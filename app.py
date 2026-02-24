@@ -6,42 +6,50 @@ st.set_page_config(page_title="嘉大綠色大學填報及彙整系統", page_ic
 
 # --- 2. 讀取安全保險箱 (Secrets) ---
 try:
+    # 🌟 修正點：將 secrets 轉換為標準字典格式，確保套件能正確讀取完整內容
     credentials = dict(st.secrets["credentials"])
-    cookie = st.secrets["cookie"]
+    cookie = dict(st.secrets["cookie"])
 except KeyError:
     st.error("⚠️ 系統找不到密碼設定，請確認 secrets.toml 檔案結構。")
     st.stop()
 
 # --- 3. 初始化登入驗證器 ---
+# 🌟 修正點：直接傳入完整的 credentials 字典
 authenticator = stauth.Authenticate(
-    credentials["usernames"],
+    credentials,
     cookie["name"],
     cookie["key"],
     cookie["expiry_days"]
 )
 
 # --- 4. 側邊欄：渲染登入介面 ---
-# authenticator.login 會自動比對我們輸入的密碼與 secrets 裡面的亂碼是否相符
-name, authentication_status, username = authenticator.login("main") 
+# 讓登入表單顯示在左側側邊欄
+authenticator.login(location='sidebar')
 
 # --- 5. 主程式邏輯分流 ---
-if authentication_status == False:
+# 最新版的套件會自動將登入狀態存在 st.session_state["authentication_status"] 裡面
+if st.session_state.get("authentication_status") is False:
     st.error("❌ 帳號或密碼錯誤，請重試。")
     st.title("🌱 嘉大綠色大學填報及彙整系統")
     st.info("👈 請先從左側側邊欄輸入帳號密碼登入。")
 
-elif authentication_status == None:
+elif st.session_state.get("authentication_status") is None:
     st.title("🌱 嘉大綠色大學填報及彙整系統")
     st.info("👈 請先從左側側邊欄輸入帳號密碼登入。")
 
-elif authentication_status == True:
+elif st.session_state.get("authentication_status") is True:
     # 登入成功！
-    st.sidebar.title(f"👤 歡迎, {name}")
+    st.sidebar.title(f"👤 歡迎, {st.session_state['name']}")
+    
+    # 渲染登出按鈕
     authenticator.logout("登出", "sidebar")
     
     st.title("🌱 嘉大綠色大學填報及彙整系統")
     
-    # 根據帳號 (username) 判斷權限
+    # 取得當前登入的帳號名稱 (admin_ui 或 ncyu_ui)
+    username = st.session_state["username"]
+    
+    # --- 根據帳號判斷專屬權限 ---
     if username == "admin_ui":
         st.success("👑 您目前的身分是：系統管理者")
         admin_action = st.radio("請選擇管理員功能：", 
