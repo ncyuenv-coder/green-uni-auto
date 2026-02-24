@@ -2,7 +2,8 @@ import streamlit as st
 import streamlit_authenticator as stauth
 
 # --- 1. 頁面基本設定 ---
-st.set_page_config(page_title="嘉大綠色大學填報及彙整系統", page_icon="🌱", layout="wide")
+# 🌟 更新：統一網頁標籤上的名稱
+st.set_page_config(page_title="嘉大綠色大學評比資料填報及彙整平台", page_icon="🌱", layout="wide")
 
 # --- 2. 讀取安全保險箱 (Secrets) ---
 try:
@@ -23,20 +24,20 @@ authenticator = stauth.Authenticate(
 # --- 4. 主程式邏輯分流與登入介面 ---
 if st.session_state.get("authentication_status") is None or st.session_state.get("authentication_status") is False:
     # --- 未登入或登入失敗的畫面 (置中登入框) ---
-    st.markdown("<br><br><br>", unsafe_allow_html=True) # 增加上方空白，讓畫面更置中
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
     
-    # 建立三個欄位：左(1)、中(1.5)、右(1)，把內容擠在中間
-    col1, col2, col3 = st.columns([1, 1.5, 1])
+    # 🌟 修正點：調整比例為 [1, 2, 1]，給中間更多空間，防止文字換行
+    col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.title("🌱 嘉大綠色大學系統")
-        st.markdown("### 填報及彙整平台")
+        # 🌟 修正點：將標題合併為同一行，並置中顯示
+        st.markdown("<h2 style='text-align: center; white-space: nowrap;'>🌱 嘉大綠色大學評比資料填報及彙整平台</h2>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True) # 增加一點與登入框的距離
         
         # 如果密碼錯誤，顯示提示
         if st.session_state.get("authentication_status") is False:
             st.error("❌ 帳號或密碼錯誤，請重試。")
             
-        # 🌟 修正點：將 location 設為 'main'，它就會顯示在這裡而不是側邊欄
         authenticator.login(location='main')
 
 elif st.session_state.get("authentication_status") is True:
@@ -44,7 +45,8 @@ elif st.session_state.get("authentication_status") is True:
     st.sidebar.title(f"👤 歡迎, {st.session_state['name']}")
     authenticator.logout("登出", "sidebar")
     
-    st.title("🌱 嘉大綠色大學填報及彙整系統")
+    # 🌟 更新：登入後的主標題也一併統一
+    st.title("🌱 嘉大綠色大學評比資料填報及彙整平台")
     username = st.session_state["username"]
     
     # 根據帳號判斷專屬權限
