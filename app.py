@@ -6,7 +6,6 @@ st.set_page_config(page_title="嘉大綠色大學填報及彙整系統", page_ic
 
 # --- 2. 讀取安全保險箱 (Secrets) ---
 try:
-    # 🌟 修正點：將 secrets 轉換為標準字典格式，確保套件能正確讀取完整內容
     credentials = dict(st.secrets["credentials"])
     cookie = dict(st.secrets["cookie"])
 except KeyError:
@@ -14,7 +13,6 @@ except KeyError:
     st.stop()
 
 # --- 3. 初始化登入驗證器 ---
-# 🌟 修正點：直接傳入完整的 credentials 字典
 authenticator = stauth.Authenticate(
     credentials,
     cookie["name"],
@@ -22,34 +20,34 @@ authenticator = stauth.Authenticate(
     cookie["expiry_days"]
 )
 
-# --- 4. 側邊欄：渲染登入介面 ---
-# 讓登入表單顯示在左側側邊欄
-authenticator.login(location='sidebar')
-
-# --- 5. 主程式邏輯分流 ---
-# 最新版的套件會自動將登入狀態存在 st.session_state["authentication_status"] 裡面
-if st.session_state.get("authentication_status") is False:
-    st.error("❌ 帳號或密碼錯誤，請重試。")
-    st.title("🌱 嘉大綠色大學填報及彙整系統")
-    st.info("👈 請先從左側側邊欄輸入帳號密碼登入。")
-
-elif st.session_state.get("authentication_status") is None:
-    st.title("🌱 嘉大綠色大學填報及彙整系統")
-    st.info("👈 請先從左側側邊欄輸入帳號密碼登入。")
+# --- 4. 主程式邏輯分流與登入介面 ---
+if st.session_state.get("authentication_status") is None or st.session_state.get("authentication_status") is False:
+    # --- 未登入或登入失敗的畫面 (置中登入框) ---
+    st.markdown("<br><br><br>", unsafe_allow_html=True) # 增加上方空白，讓畫面更置中
+    
+    # 建立三個欄位：左(1)、中(1.5)、右(1)，把內容擠在中間
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    
+    with col2:
+        st.title("🌱 嘉大綠色大學系統")
+        st.markdown("### 填報及彙整平台")
+        
+        # 如果密碼錯誤，顯示提示
+        if st.session_state.get("authentication_status") is False:
+            st.error("❌ 帳號或密碼錯誤，請重試。")
+            
+        # 🌟 修正點：將 location 設為 'main'，它就會顯示在這裡而不是側邊欄
+        authenticator.login(location='main')
 
 elif st.session_state.get("authentication_status") is True:
-    # 登入成功！
+    # --- 登入成功的畫面 ---
     st.sidebar.title(f"👤 歡迎, {st.session_state['name']}")
-    
-    # 渲染登出按鈕
     authenticator.logout("登出", "sidebar")
     
     st.title("🌱 嘉大綠色大學填報及彙整系統")
-    
-    # 取得當前登入的帳號名稱 (admin_ui 或 ncyu_ui)
     username = st.session_state["username"]
     
-    # --- 根據帳號判斷專屬權限 ---
+    # 根據帳號判斷專屬權限
     if username == "admin_ui":
         st.success("👑 您目前的身分是：系統管理者")
         admin_action = st.radio("請選擇管理員功能：", 
