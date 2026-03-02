@@ -102,7 +102,8 @@ with st.spinner('🔄 正在載入最新評比題目...'):
     df_questions = load_gsheet_data()
 
 if not df_questions.empty:
-    required_columns = ['2026年題目', '中文名稱', '資料需求', '權責單位', '2025年題目']
+    # 🌟 更新點：對應您最新的 Google Sheet 欄位名稱
+    required_columns = ['當年度題目', '英文標題', '中文標題', '中文說明', '資料需求', '權責單位', '前一年度題目']
     missing_columns = [col for col in required_columns if col not in df_questions.columns]
     
     if missing_columns:
@@ -115,21 +116,21 @@ if not df_questions.empty:
     unit_list = df_questions['權責單位'].dropna().unique().tolist()
     unit_list = [str(u).strip() for u in unit_list if str(u).strip() != '']
     
-    # 步驟一：客製化莫蘭迪標題 + 隱藏預設標籤的下拉選單
+    # 步驟一：選擇單位
     st.markdown("<div class='morandi-title'>🏢 請選擇您的單位</div>", unsafe_allow_html=True)
     selected_unit = st.selectbox("", ["請選擇..."] + unit_list, label_visibility="collapsed")
     
     if selected_unit != "請選擇...":
         df_unit_questions = df_questions[df_questions['權責單位'].astype(str).str.strip() == selected_unit].copy()
         
-        # 步驟二：A欄 (2026年題目) + C欄 (中文名稱)
-        df_unit_questions['選項標示'] = df_unit_questions['2026年題目'].astype(str) + " - " + df_unit_questions['中文名稱'].astype(str)
+        # 步驟二：選擇填報項目 (當年度題目 - 中文標題)
+        df_unit_questions['選項標示'] = df_unit_questions['當年度題目'].astype(str) + " - " + df_unit_questions['中文標題'].astype(str)
         
         st.markdown("<div class='morandi-title'>📌 請選擇填報項目</div>", unsafe_allow_html=True)
         selected_option = st.selectbox("", df_unit_questions['選項標示'].tolist(), label_visibility="collapsed")
         
         selected_q_id = selected_option.split(" - ")[0]
-        question_data = df_unit_questions[df_unit_questions['2026年題目'].astype(str) == selected_q_id].iloc[0]
+        question_data = df_unit_questions[df_unit_questions['當年度題目'].astype(str) == selected_q_id].iloc[0]
         
         st.markdown("---")
         
@@ -137,18 +138,18 @@ if not df_questions.empty:
         # 🎯 顯示題目詳細資訊
         # ==========================================
         # 1. 填報項目顯示標題 (當年度題目：中文標題)
-        st.markdown(f"<div class='morandi-title'>📖 {question_data.get('2026年題目')}：{question_data.get('中文名稱')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='morandi-title'>📖 {question_data.get('當年度題目')}：{question_data.get('中文標題')}</div>", unsafe_allow_html=True)
         
-        # 2. 中文說明 (黑色字體)
-        st.markdown(f"<div style='color: black; font-size: 1.1em; padding-left: 5px; margin-bottom: 15px;'><b>中文說明：</b> {question_data.get('中文名稱')}</div>", unsafe_allow_html=True)
+        # 2. 中文說明 (黑色字體，直接抓取新增的"中文說明"欄位)
+        st.markdown(f"<div style='color: black; font-size: 1.1em; padding-left: 5px; margin-bottom: 15px;'><b>中文說明：</b><br>{question_data.get('中文說明', '無')}</div>", unsafe_allow_html=True)
         
         # 3. 資料需求 (莫蘭迪區塊)
         st.markdown(f"<div class='morandi-req'><b>🔍 資料需求：</b><br>{question_data.get('資料需求', '無特別說明')}</div>", unsafe_allow_html=True)
         
         # 4. 前一年度參考資訊 (摺疊展開)
         with st.expander("💡 點擊展開查看：前一年度參考資訊"):
-            st.write(f"**對應之 2025 年題目：** {question_data.get('2025年題目', '無')}")
-            st.info("*(🚧 此處保留擴充彈性：未來我們將開發 AI 機器人，根據上方 2025 年題號，自動從您的 Word 檔中擷取英文內容、翻譯成中文並將照片顯示於此。)*")
+            st.write(f"**對應之去年度題目：** {question_data.get('前一年度題目', '無')}")
+            st.info("*(🚧 此處保留擴充彈性：未來我們將開發 AI 機器人，根據上方題號，自動從您的 Word 檔中擷取英文內容、翻譯成中文並將照片顯示於此。)*")
             
         st.markdown("---")
         
@@ -169,7 +170,7 @@ if not df_questions.empty:
                 accept_multiple_files=True
             )
             
-            # 5. 資料確認送出按鈕 (CSS已設定置中與莫蘭迪橘色)
+            # 5. 資料確認送出按鈕
             submitted = st.form_submit_button("📤 資料確認送出")
             
             if submitted:
