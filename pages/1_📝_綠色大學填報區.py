@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import gspread
-from google.oauth2.service_account import Credentials
+# 🌟 修正點：改為匯入支援 refresh_token 的標準 Credentials 套件
+from google.oauth2.credentials import Credentials
 
 # ==========================================
 # 🛡️ 資安防護罩：檢查是否已登入
@@ -18,32 +19,29 @@ st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", l
 @st.cache_data(ttl=600) # 快取 10 分鐘，不用每次點擊都重新讀取 Google Sheet
 def load_gsheet_data():
     try:
-        # 1. 設定 Google API 權限範圍
-        scopes = [
-            'https://www.googleapis.com/auth/spreadsheets',
-            'https://www.googleapis.com/auth/drive'
-        ]
-        
-        # 2. 從保險箱 (secrets) 讀取金鑰，並轉成字典格式
+        # 1. 從保險箱 (secrets) 讀取你的 OAuth 金鑰
         skey = st.secrets["gcp_oauth"].to_dict()
         
-        # 🌟 這是除錯探照燈：把系統真正抓到的「欄位名稱」印出來給我們看 (很安全，不會印出密碼)
-        st.info(f"🔍 系統目前讀取到的金鑰欄位有：{', '.join(skey.keys())}")
+        # 2. 🌟 關鍵修正：使用你專屬的 refresh_token 來建立連線憑證
+        credentials = Credentials(
+            token=None,
+            refresh_token=skey.get("refresh_token"),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=skey.get("client_id"),
+            client_secret=skey.get("client_secret")
+        )
         
-        # 3. 建立憑證
-        credentials = Credentials.from_service_account_info(skey, scopes=scopes)
-        
-        # 4. 授權並連線
+        # 3. 授權並連線
         gc = gspread.authorize(credentials)
         
-        # 5. 打開你的 Google Sheet (使用你提供的專屬 ID)
+        # 4. 打開你的 Google Sheet (使用你提供的專屬 ID)
         SHEET_ID = '1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8'
         sh = gc.open_by_key(SHEET_ID)
         
-        # 6. 選擇名為「評比題目表」的分頁
+        # 5. 選擇名為「評比題目表」的分頁
         worksheet = sh.worksheet("評比題目表")
         
-        # 7. 把資料抓下來，轉成 Pandas 格式方便我們操作
+        # 6. 把資料抓下來，轉成 Pandas 格式方便我們操作
         data = worksheet.get_all_records()
         df = pd.DataFrame(data)
         
@@ -106,6 +104,5 @@ if not df_questions.empty:
     st.subheader("📤 本年度資料填報與上傳")
     st.write("*(🚧 這裡將是我們下一步要開發的：文字輸入框與檔案上傳按鈕)*")
     
-elif not df_questions.empty is False and 'df_questions' in locals():
-    # 只有當沒有報錯，但真的沒資料時才顯示這個警告
+elif 'df_questions' in locals() and df_questions.empty:
     st.warning("目前資料庫中沒有題目，請確認 Google Sheet 的「評比題目表」是否已填入資料。")
