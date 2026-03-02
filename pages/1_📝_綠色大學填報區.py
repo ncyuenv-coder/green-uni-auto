@@ -24,23 +24,26 @@ def load_gsheet_data():
             'https://www.googleapis.com/auth/drive'
         ]
         
-        # 2. 從保險箱 (secrets) 讀取金鑰
-        # 🌟 修正點：使用 .to_dict() 將 Streamlit Secrets 轉換為標準 Python 字典
-        # 這樣 Google 的套件才能正確讀取到 client_email 和 token_uri 等欄位
+        # 2. 從保險箱 (secrets) 讀取金鑰，並轉成字典格式
         skey = st.secrets["gcp_oauth"].to_dict()
+        
+        # 🌟 這是除錯探照燈：把系統真正抓到的「欄位名稱」印出來給我們看 (很安全，不會印出密碼)
+        st.info(f"🔍 系統目前讀取到的金鑰欄位有：{', '.join(skey.keys())}")
+        
+        # 3. 建立憑證
         credentials = Credentials.from_service_account_info(skey, scopes=scopes)
         
-        # 3. 授權並連線
+        # 4. 授權並連線
         gc = gspread.authorize(credentials)
         
-        # 4. 打開你的 Google Sheet (使用你提供的專屬 ID)
+        # 5. 打開你的 Google Sheet (使用你提供的專屬 ID)
         SHEET_ID = '1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8'
         sh = gc.open_by_key(SHEET_ID)
         
-        # 5. 選擇名為「評比題目表」的分頁
+        # 6. 選擇名為「評比題目表」的分頁
         worksheet = sh.worksheet("評比題目表")
         
-        # 6. 把資料抓下來，轉成 Pandas 格式方便我們操作
+        # 7. 把資料抓下來，轉成 Pandas 格式方便我們操作
         data = worksheet.get_all_records()
         df = pd.DataFrame(data)
         
@@ -103,5 +106,6 @@ if not df_questions.empty:
     st.subheader("📤 本年度資料填報與上傳")
     st.write("*(🚧 這裡將是我們下一步要開發的：文字輸入框與檔案上傳按鈕)*")
     
-else:
+elif not df_questions.empty is False and 'df_questions' in locals():
+    # 只有當沒有報錯，但真的沒資料時才顯示這個警告
     st.warning("目前資料庫中沒有題目，請確認 Google Sheet 的「評比題目表」是否已填入資料。")
