@@ -25,13 +25,15 @@ def load_gsheet_data():
         ]
         
         # 2. 從保險箱 (secrets) 讀取金鑰
-        skey = dict(st.secrets["gcp_oauth"])
+        # 🌟 修正點：使用 .to_dict() 將 Streamlit Secrets 轉換為標準 Python 字典
+        # 這樣 Google 的套件才能正確讀取到 client_email 和 token_uri 等欄位
+        skey = st.secrets["gcp_oauth"].to_dict()
         credentials = Credentials.from_service_account_info(skey, scopes=scopes)
         
         # 3. 授權並連線
         gc = gspread.authorize(credentials)
         
-        # 4. 打開你的 Google Sheet
+        # 4. 打開你的 Google Sheet (使用你提供的專屬 ID)
         SHEET_ID = '1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8'
         sh = gc.open_by_key(SHEET_ID)
         
