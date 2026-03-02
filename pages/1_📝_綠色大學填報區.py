@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import gspread
-# 🌟 修正點：改為匯入支援 refresh_token 的標準 Credentials 套件
 from google.oauth2.credentials import Credentials
 
 # ==========================================
@@ -16,13 +15,11 @@ st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", l
 # ==========================================
 # 🔌 資料庫連線設定 (使用快取避免超過 API 限制)
 # ==========================================
-@st.cache_data(ttl=600) # 快取 10 分鐘，不用每次點擊都重新讀取 Google Sheet
+@st.cache_data(ttl=600)
 def load_gsheet_data():
     try:
-        # 1. 從保險箱 (secrets) 讀取你的 OAuth 金鑰
         skey = st.secrets["gcp_oauth"].to_dict()
         
-        # 2. 🌟 關鍵修正：使用你專屬的 refresh_token 來建立連線憑證
         credentials = Credentials(
             token=None,
             refresh_token=skey.get("refresh_token"),
@@ -31,78 +28,122 @@ def load_gsheet_data():
             client_secret=skey.get("client_secret")
         )
         
-        # 3. 授權並連線
         gc = gspread.authorize(credentials)
-        
-        # 4. 打開你的 Google Sheet (使用你提供的專屬 ID)
         SHEET_ID = '1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8'
         sh = gc.open_by_key(SHEET_ID)
-        
-        # 5. 選擇名為「評比題目表」的分頁
         worksheet = sh.worksheet("評比題目表")
         
-        # 6. 把資料抓下來，轉成 Pandas 格式方便我們操作
         data = worksheet.get_all_records()
         df = pd.DataFrame(data)
         
-        # 把所有欄位名稱的頭尾空白去掉，避免對應不到
+        # 把所有欄位名稱的頭尾空白去掉
         df.columns = df.columns.str.strip()
         return df
         
     except Exception as e:
-        st.error(f"⚠️ 無法讀取 Google Sheet，請確認權限是否設定正確或分頁名稱是否為「評比題目表」。\n詳細錯誤：{e}")
+        st.error(f"⚠️ 無法讀取 Google Sheet，詳細錯誤：{e}")
         return pd.DataFrame()
 
 # ==========================================
 # 🚀 網頁主畫面：填報介面設計
 # ==========================================
 st.title("📝 嘉大綠色大學填報區")
-st.info(f"👤 目前登入單位：{st.session_state.get('username', '未知')}")
+st.info(f"👤 目前登入帳號：{st.session_state.get('username', '未知')}")
 
-# 顯示載入動畫，呼叫我們上面寫好的讀取函數
 with st.spinner('🔄 正在從雲端載入最新評比題目，請稍候...'):
     df_questions = load_gsheet_data()
 
-# 如果有成功抓到資料，就顯示在畫面上
 if not df_questions.empty:
+    # 檢查必要欄位是否存在 (防呆機制)
+    required_columns = ['2026年題目', '中文名稱', '資料需求', '權責單位', '2025年題目']
+    missing_columns = [col for col in required_columns if col not in df_questions.columns]
+    
+    if missing_columns:
+        st.error(f"⚠️ Google Sheet 找不到以下欄位：{', '.join(missing_columns)}")
+        st.warning(f"🔍 目前實際讀到的欄位有：{df_questions.columns.tolist()}")
+        st.stop()
+        
     st.success("✅ 題目資料庫連線成功！")
     st.markdown("---")
     
-    # 【第一區：選擇題目】
-    # 把「題號」跟「題目名稱」合併起來，放在下拉選單讓使用者選
-    df_questions['選項標示'] = df_questions['題號'].astype(str) + " - " + df_questions['題目名稱'].astype(str)
+    # ==========================================
+    # 🎯 第一階段：篩選權責單位
+    # ==========================================
+    # 抓出所有不重複的權責單位，並過濾掉空白的
+    unit_list = df_questions['權責單位'].dropna().unique().tolist()
+    unit_list = [str(u).strip() for u in unit_list if str(u).strip() != '']
     
-    selected_option = st.selectbox(
-        "📌 請選擇您要填報的評比項目：", 
-        df_questions['選項標示'].tolist()
+    selected_unit = st.selectbox(
+        "🏢 步驟一：請選擇您的【權責單位】", 
+        ["請選擇..."] + unit_list
     )
     
-    # 根據使用者選的項目，把那一題的詳細資料抓出來
-    selected_q_id = selected_option.split(" - ")[0]
-    # 找出題號符合的那一橫列資料
-    question_data = df_questions[df_questions['題號'].astype(str) == selected_q_id].iloc[0]
-    
-    # 【第二區：顯示題目詳細資訊】
-    st.subheader(f"📖 {selected_option}")
-    
-    # 用兩個欄位並排顯示，左邊是需求，右邊是參考資料
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**🔑 關鍵字：**")
-        st.write(question_data.get('關鍵字', '無'))
+    if selected_unit != "請選擇...":
+        # 依照選取的單位，過濾出專屬的題目
+        df_unit_questions = df_questions[df_questions['權責單位'].astype(str).str.strip() == selected_unit].copy()
         
-        st.markdown("**📄 內容需求：**")
-        st.write(question_data.get('內容需求', '無'))
+        # ==========================================
+        # 🎯 第二階段：選擇題目
+        # ==========================================
+        # 組合「2026年題目 - 中文名稱」供選單顯示
+        df_unit_questions['選項標示'] = df_unit_questions['2026年題目'].astype(str) + " - " + df_unit_questions['中文名稱'].astype(str)
         
-    with col2:
-        st.markdown("**💡 前一年度參考資料：**")
-        st.info(question_data.get('前一年度參考資料', '尚無參考資料（待 AI 翻譯後自動帶入）'))
+        selected_option = st.selectbox(
+            "📌 步驟二：請選擇要填報的【評比項目】", 
+            df_unit_questions['選項標示'].tolist()
+        )
         
-    st.markdown("---")
-    
-    # 【第三區：實際填寫表單 (預留位置)】
-    st.subheader("📤 本年度資料填報與上傳")
-    st.write("*(🚧 這裡將是我們下一步要開發的：文字輸入框與檔案上傳按鈕)*")
-    
+        # 找出使用者選中的那一題的所有資料
+        selected_q_id = selected_option.split(" - ")[0]
+        question_data = df_unit_questions[df_unit_questions['2026年題目'].astype(str) == selected_q_id].iloc[0]
+        
+        st.markdown("---")
+        
+        # ==========================================
+        # 🎯 第三階段：顯示題目詳細資訊與 2025 參考
+        # ==========================================
+        st.subheader(f"📖 {selected_option}")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**📄 資料需求 (2026)：**")
+            st.info(question_data.get('資料需求', '無特別說明'))
+            
+        with col2:
+            st.markdown("**💡 2025 年參考資訊：**")
+            st.warning(question_data.get('2025年題目', '尚無去年度資料'))
+            st.caption("*(備註：此處目前顯示 Google Sheet 內的文字，未來可擴充顯示 Word 萃取出的照片或完整翻譯)*")
+            
+        st.markdown("---")
+        
+        # ==========================================
+        # 🎯 第四階段：本年度填報與上傳區
+        # ==========================================
+        st.subheader("📤 步驟三：本年度 (2026) 成果填報與上傳")
+        
+        with st.form("report_form"):
+            # 填報文字框
+            report_text = st.text_area(
+                "✍️ 請填寫本年度執行成果與說明：", 
+                height=150, 
+                placeholder="請在此輸入您的填報內容..."
+            )
+            
+            # 檔案上傳區 (可多選)
+            uploaded_files = st.file_uploader(
+                "📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等，可多選)：", 
+                accept_multiple_files=True
+            )
+            
+            # 送出按鈕
+            submitted = st.form_submit_button("✅ 送出填報資料")
+            
+            if submitted:
+                if not report_text.strip() and not uploaded_files:
+                    st.error("⚠️ 請至少填寫成果說明或上傳佐證檔案！")
+                else:
+                    st.success("🎉 資料已暫存成功！畫面上看起來已經完美了！")
+                    st.info("*(開發中提示：下一個階段我們就會把這裡填寫的文字與檔案，真正寫入到您的「填報資料庫」與 Google Drive 中！)*")
+
 elif 'df_questions' in locals() and df_questions.empty:
     st.warning("目前資料庫中沒有題目，請確認 Google Sheet 的「評比題目表」是否已填入資料。")
