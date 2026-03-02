@@ -102,7 +102,6 @@ with st.spinner('🔄 正在載入最新評比題目...'):
     df_questions = load_gsheet_data()
 
 if not df_questions.empty:
-    # 🌟 更新點：對應您最新的 Google Sheet 欄位名稱
     required_columns = ['當年度題目', '英文標題', '中文標題', '中文說明', '資料需求', '權責單位', '前一年度題目']
     missing_columns = [col for col in required_columns if col not in df_questions.columns]
     
@@ -140,16 +139,45 @@ if not df_questions.empty:
         # 1. 填報項目顯示標題 (當年度題目：中文標題)
         st.markdown(f"<div class='morandi-title'>📖 {question_data.get('當年度題目')}：{question_data.get('中文標題')}</div>", unsafe_allow_html=True)
         
-        # 2. 中文說明 (黑色字體，直接抓取新增的"中文說明"欄位)
+        # 2. 中文說明 (黑色字體)
         st.markdown(f"<div style='color: black; font-size: 1.1em; padding-left: 5px; margin-bottom: 15px;'><b>中文說明：</b><br>{question_data.get('中文說明', '無')}</div>", unsafe_allow_html=True)
         
         # 3. 資料需求 (莫蘭迪區塊)
         st.markdown(f"<div class='morandi-req'><b>🔍 資料需求：</b><br>{question_data.get('資料需求', '無特別說明')}</div>", unsafe_allow_html=True)
         
-        # 4. 前一年度參考資訊 (摺疊展開)
-        with st.expander("💡 點擊展開查看：前一年度參考資訊"):
+        # 4. 前一年度參考資訊 (摺疊展開) - ✨ 本次更新重點區域
+        with st.expander("💡 點擊展開查看：前一年度 (2025) 參考資訊"):
             st.write(f"**對應之去年度題目：** {question_data.get('前一年度題目', '無')}")
-            st.info("*(🚧 此處保留擴充彈性：未來我們將開發 AI 機器人，根據上方題號，自動從您的 Word 檔中擷取英文內容、翻譯成中文並將照片顯示於此。)*")
+            
+            # 安全讀取預留欄位 (使用 pd.notna 避免讀到空值報錯)
+            ref_text = question_data.get('2025參考文字_AI預留', '')
+            ref_img_urls = question_data.get('2025參考圖片連結_AI預留', '')
+            
+            st.markdown("---")
+            
+            # 顯示文字翻譯
+            if pd.notna(ref_text) and str(ref_text).strip() != "":
+                st.markdown("**📝 去年度填報內容 (中文翻譯)：**")
+                st.write(str(ref_text))
+            else:
+                st.info("*(🚧 系統提示：尚無去年度文字資料，待後台擷取後自動匯入。)*")
+                
+            # 顯示照片 (將逗號隔開的網址切開，並排顯示)
+            if pd.notna(ref_img_urls) and str(ref_img_urls).strip() != "":
+                st.markdown("**📸 去年度佐證照片：**")
+                # 把網址用逗號切開，變成一個列表
+                urls = [url.strip() for url in str(ref_img_urls).split(',') if url.strip()]
+                
+                if urls:
+                    # 根據照片數量建立對應數量的欄位 (columns) 讓照片並排
+                    cols = st.columns(len(urls))
+                    for idx, col in enumerate(cols):
+                        with col:
+                            try:
+                                # use_container_width=True 讓照片自動縮放適應欄位寬度
+                                st.image(urls[idx], use_container_width=True)
+                            except Exception as e:
+                                st.error("⚠️ 圖片載入失敗，請確認網址是否正確。")
             
         st.markdown("---")
         
