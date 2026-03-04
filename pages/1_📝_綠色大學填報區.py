@@ -2,6 +2,20 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.credentials import Credentials
+import re  # 🌟 新增：用於正規表達式替換
+
+# ==========================================
+# 🪄 魔法轉換器：破解 Google Drive 圖片防盜鏈
+# ==========================================
+def fix_drive_images(text):
+    if not isinstance(text, str):
+        return ""
+    # 1. 將傳統的 uc?id 換成隱藏版的 thumbnail API (並設定寬度為 1000px 確保高畫質)
+    text = text.replace("https://drive.google.com/uc?id=", "https://drive.google.com/thumbnail?sz=w1000&id=")
+    # 2. 將 Markdown 的圖片語法強制轉為 HTML，並加上防盜鏈破解 (referrerpolicy="no-referrer")
+    pattern = r'!\[.*?\]\((https://drive\.google\.com/thumbnail\?sz=w1000&id=[a-zA-Z0-9_-]+)\)'
+    html_text = re.sub(pattern, r'<img src="\1" referrerpolicy="no-referrer" style="max-width: 100%; border-radius: 8px; margin: 10px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">', text)
+    return html_text
 
 # ==========================================
 # 🛡️ 資安防護罩：檢查是否已登入
@@ -155,26 +169,24 @@ if not df_questions.empty:
             
             st.markdown("---")
             
-            # 顯示文字翻譯
+            # 🌟 這裡套用了魔法轉換器！顯示圖文並茂的翻譯內容
             if pd.notna(ref_text) and str(ref_text).strip() != "":
-                st.markdown("**📝 去年度填報內容 (中文翻譯)：**")
-                st.write(str(ref_text))
+                st.markdown("**📝 去年度填報內容 (圖文整合)：**")
+                # 將文字送進魔法轉換器清洗，然後允許 HTML 語法生效
+                fixed_content = fix_drive_images(str(ref_text))
+                st.markdown(fixed_content, unsafe_allow_html=True)
             else:
                 st.info("*(🚧 系統提示：尚無去年度文字資料，待後台擷取後自動匯入。)*")
                 
-            # 顯示照片 (將逗號隔開的網址切開，並排顯示)
+            # (保留您原本的圖片欄位邏輯以防萬一，但因為我們現在已經把圖片融合進文字裡，這裡通常會是空的)
             if pd.notna(ref_img_urls) and str(ref_img_urls).strip() != "":
-                st.markdown("**📸 去年度佐證照片：**")
-                # 把網址用逗號切開，變成一個列表
+                st.markdown("**📸 附加佐證照片：**")
                 urls = [url.strip() for url in str(ref_img_urls).split(',') if url.strip()]
-                
                 if urls:
-                    # 根據照片數量建立對應數量的欄位 (columns) 讓照片並排
                     cols = st.columns(len(urls))
                     for idx, col in enumerate(cols):
                         with col:
                             try:
-                                # use_container_width=True 讓照片自動縮放適應欄位寬度
                                 st.image(urls[idx], use_container_width=True)
                             except Exception as e:
                                 st.error("⚠️ 圖片載入失敗，請確認網址是否正確。")
