@@ -5,92 +5,6 @@ from google.oauth2.credentials import Credentials
 import re
 
 # ==========================================
-# 🪄 魔法轉換器 3.0：真實 HTML 表格重建與照片尺寸控制
-# ==========================================
-def fix_drive_images_and_tables(text):
-    if not isinstance(text, str):
-        return ""
-    
-    # 1. 替換 Google Drive 圖片 API 為高畫質縮圖
-    text = text.replace("https://drive.google.com/uc?id=", "https://drive.google.com/thumbnail?sz=w1000&id=")
-    
-    # 2. 將圖片 Markdown 轉為 HTML img 標籤 (🌟 解決問題 3：限制最大高度，取消滿版)
-    pattern = r'!\[.*?\]\((https://drive\.google\.com/thumbnail\?sz=w1000&id=[a-zA-Z0-9_-]+)\)'
-    # max-height: 250px; object-fit: contain; 保證照片不變形且不會過大
-    img_html = r'<br><img src="\1" referrerpolicy="no-referrer" style="max-width: 100%; max-height: 250px; object-fit: contain; border-radius: 4px; margin-top: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">'
-    text = re.sub(pattern, img_html, text)
-    
-    # 3. 處理「表格」結構轉換為真實的 HTML <table> (🌟 解決問題 2：忠實呈現 Word 排版)
-    if "📊" in text or "【第" in text:
-        lines = text.split('\n')
-        html_parts = []
-        in_table = False
-        in_row = False
-        in_cell = False
-        
-        for line in lines:
-            line_str = line.replace('>', '').strip()
-            
-            # 偵測表格開頭
-            if "📊" in line_str or "表格資料解析" in line_str:
-                if not in_table:
-                    in_table = True
-                    html_parts.append('<table style="width: 100%; border-collapse: collapse; border: 2px solid #8F9CA3; margin-top: 15px; margin-bottom: 15px;">')
-                continue
-                
-            if in_table and line_str == "---":
-                if in_cell: html_parts.append('</td>')
-                if in_row: html_parts.append('</tr>')
-                html_parts.append('</table>')
-                in_table = False
-                in_row = False
-                in_cell = False
-                continue
-                
-            if in_table:
-                # 偵測【第 X 列】
-                if re.search(r'【第 \d+ 列】', line_str):
-                    if in_cell: html_parts.append('</td>')
-                    if in_row: html_parts.append('</tr>')
-                    html_parts.append('<tr style="border-bottom: 1px solid #d9d9d9;">')
-                    in_row = True
-                    in_cell = False
-                    continue
-                    
-                # 偵測 [欄位 X] (加入容錯：容許 Column 或沒有冒號的情況)
-                col_match = re.search(r'\[?(欄位|Column)\s*\d+\]?[*\s]*[:：]?(.*)', line_str, re.IGNORECASE)
-                if col_match:
-                    if in_cell: html_parts.append('</td>')
-                    html_parts.append('<td style="border: 1px solid #d9d9d9; padding: 15px; vertical-align: top; background-color: #ffffff; width: auto;">')
-                    in_cell = True
-                    cell_text = col_match.group(2).strip()
-                    if cell_text:
-                        html_parts.append(f'<span style="color: #333; line-height: 1.6;">{cell_text}</span>')
-                    continue
-                    
-                # 儲存格內容 (文字或已經轉好的圖片標籤)
-                if in_cell and line_str:
-                    clean_line = line_str.replace('**', '')
-                    html_parts.append(f'<div style="margin-top: 5px;">{clean_line}</div>')
-            else:
-                # 非表格區塊的正常文字
-                clean_line = line_str.replace('**', '')
-                if clean_line:
-                    html_parts.append(f'<p style="margin-bottom: 5px; line-height: 1.6;">{clean_line}</p>')
-
-        if in_table: # 安全收尾
-            if in_cell: html_parts.append('</td>')
-            if in_row: html_parts.append('</tr>')
-            html_parts.append('</table>')
-            
-        return "".join(html_parts)
-    else:
-        # 如果根本沒有表格特徵，只做簡單的換行處理
-        text = text.replace('**', '')
-        return text.replace('\n', '<br>')
-
-
-# ==========================================
 # 🛡️ 資安防護罩
 # ==========================================
 if st.session_state.get("authentication_status") is not True:
@@ -125,32 +39,15 @@ st.markdown("""
         line-height: 1.6;
         font-size: 1.05em;
     }
-    div.stButton {
-        display: flex;
-        justify-content: center;
-        margin-top: 20px;
-        margin-bottom: 40px;
-    }
     div.stButton > button:first-child {
-        background-color: #D4A373 !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 8px !important;
-        padding: 12px 30px !important;
-        font-size: 18px !important;
+        border-radius: 6px !important;
         font-weight: bold !important;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important;
-        transition: all 0.3s ease !important;
-    }
-    div.stButton > button:first-child:hover {
-        background-color: #C08D5D !important;
-        box-shadow: 0 6px 8px rgba(0,0,0,0.15) !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🔌 資料庫連線設定
+# 🔌 資料庫連線與快取控制 (🌟 新增快取清除機制)
 # ==========================================
 @st.cache_data(ttl=600)
 def load_gsheet_data():
@@ -176,21 +73,154 @@ def load_gsheet_data():
         return pd.DataFrame()
 
 # ==========================================
+# 🪄 超級渲染引擎：將純文字轉換為 Streamlit 原生排版
+# ==========================================
+def render_native_content(text):
+    if not isinstance(text, str) or not text.strip():
+        st.info("*(🚧 系統提示：尚無去年度文字資料，待後台擷取後自動匯入。)*")
+        return
+
+    lines = text.split('\n')
+    in_table = False
+    current_table = []
+    current_row = []
+    current_cell = {"text": "", "images": []}
+    
+    ui_blocks = [] # 儲存解析後的區塊
+    
+    for line in lines:
+        line_str = line.strip()
+        if line_str.startswith('>'):
+            line_str = line_str[1:].strip()
+            
+        # 隱藏並標記表格開始
+        if "📊" in line_str or "表格資料解析" in line_str:
+            in_table = True
+            continue
+            
+        # 表格結束
+        if in_table and line_str == "---":
+            if current_cell["text"].strip() or current_cell["images"]:
+                current_row.append(current_cell)
+            if current_row:
+                current_table.append(current_row)
+            if current_table:
+                ui_blocks.append({"type": "table", "rows": current_table})
+            
+            in_table = False
+            current_table = []
+            current_row = []
+            current_cell = {"text": "", "images": []}
+            continue
+            
+        if in_table:
+            # 隱藏【第 X 列】並作為換列觸發器
+            if re.search(r'【第 \d+ 列】', line_str):
+                if current_cell["text"].strip() or current_cell["images"]:
+                    current_row.append(current_cell)
+                if current_row:
+                    current_table.append(current_row)
+                    
+                current_row = []
+                current_cell = {"text": "", "images": []}
+                continue
+                
+            # 隱藏 [欄位 X] 並擷取內容
+            if "[欄位" in line_str or "[Column" in line_str:
+                if current_cell["text"].strip() or current_cell["images"]:
+                    current_row.append(current_cell)
+                    
+                parts = re.split(r'[：:]', line_str, maxsplit=1)
+                text_content = parts[1].strip() if len(parts) > 1 else ""
+                text_content = text_content.replace('**', '').replace('*', '').strip()
+                
+                current_cell = {"text": text_content + "\n", "images": []}
+                continue
+            
+            # 擷取圖片網址並轉換為防盜鏈縮圖 API
+            img_matches = re.findall(r'!\[.*?\]\((https://drive\.google\.com/[^\)]+)\)', line_str)
+            if img_matches:
+                for img_url in img_matches:
+                    thumb_url = img_url.replace("uc?id=", "thumbnail?sz=w1000&id=")
+                    current_cell["images"].append(thumb_url)
+                
+                # 移除 Markdown 圖片語法，只保留純文字
+                clean_line = re.sub(r'!\[.*?\]\(.*?\)', '', line_str).replace('**', '').replace('*', '').strip()
+                if clean_line:
+                    current_cell["text"] += clean_line + "\n"
+                continue
+            
+            clean_line = line_str.replace('**', '').replace('*', '').strip()
+            if clean_line:
+                current_cell["text"] += clean_line + "\n"
+                
+        else:
+            # 處理非表格的一般文字與圖片
+            img_matches = re.findall(r'!\[.*?\]\((https://drive\.google\.com/[^\)]+)\)', line_str)
+            if img_matches:
+                for img_url in img_matches:
+                    thumb_url = img_url.replace("uc?id=", "thumbnail?sz=w1000&id=")
+                    ui_blocks.append({"type": "image", "url": thumb_url})
+                
+                clean_line = re.sub(r'!\[.*?\]\(.*?\)', '', line_str).replace('**', '').replace('*', '').strip()
+                if clean_line:
+                    ui_blocks.append({"type": "text", "content": clean_line})
+            else:
+                clean_line = line_str.replace('**', '').replace('*', '').strip()
+                if clean_line:
+                    ui_blocks.append({"type": "text", "content": clean_line})
+
+    # 補足最後一筆資料
+    if in_table:
+        if current_cell["text"].strip() or current_cell["images"]:
+            current_row.append(current_cell)
+        if current_row:
+            current_table.append(current_row)
+        if current_table:
+            ui_blocks.append({"type": "table", "rows": current_table})
+
+    # 🚀 真正繪製到 Streamlit 網頁上
+    for block in ui_blocks:
+        if block["type"] == "text":
+            st.markdown(block["content"])
+        elif block["type"] == "image":
+            # 非表格內的獨立圖片，限制寬度避免過大
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.image(block["url"], use_container_width=True)
+        elif block["type"] == "table":
+            for row in block["rows"]:
+                if not row: continue
+                # 自動依據欄位數量切分等寬欄位
+                cols = st.columns(len(row))
+                for idx, cell in enumerate(row):
+                    with cols[idx]:
+                        # 🌟 使用 Streamlit 內建帶邊框的容器，完美模擬表格儲存格！
+                        with st.container(border=True):
+                            # 照片在上方
+                            for img_url in cell["images"]:
+                                st.image(img_url, use_container_width=True)
+                            # 翻譯文字在下方
+                            if cell["text"].strip():
+                                st.markdown(cell["text"].strip())
+
+
+# ==========================================
 # 🚀 網頁主畫面
 # ==========================================
-st.title("📝 嘉大綠色大學填報區")
+col_title, col_btn = st.columns([3, 1])
+with col_title:
+    st.title("📝 嘉大綠色大學填報區")
+with col_btn:
+    st.write("") # 排版佔位
+    if st.button("🔄 同步最新雲端資料", use_container_width=True):
+        load_gsheet_data.clear()
+        st.rerun()
 
 with st.spinner('🔄 正在載入最新評比題目...'):
     df_questions = load_gsheet_data()
 
 if not df_questions.empty:
-    required_columns = ['當年度題目', '英文標題', '中文標題', '中文說明', '資料需求', '權責單位', '前一年度題目']
-    missing_columns = [col for col in required_columns if col not in df_questions.columns]
-    
-    if missing_columns:
-        st.error(f"⚠️ Google Sheet 找不到以下欄位：{', '.join(missing_columns)}")
-        st.stop()
-        
     unit_list = df_questions['權責單位'].dropna().unique().tolist()
     unit_list = [str(u).strip() for u in unit_list if str(u).strip() != '']
     
@@ -214,21 +244,16 @@ if not df_questions.empty:
         st.markdown(f"<div class='morandi-req'><b>🔍 資料需求：</b><br>{question_data.get('資料需求', '無特別說明')}</div>", unsafe_allow_html=True)
         
         # ==========================================
-        # ✨ 優化後的參考資訊區塊
+        # ✨ 終極版：原生元件渲染區塊
         # ==========================================
         with st.expander("💡 點擊展開查看：前一年度 (2025) 參考資訊", expanded=True):
-            
-            # 乾淨單純的呈現對應去年度題目
             st.markdown(f"**對應之去年度題目：** {question_data.get('前一年度題目', '無')}")
+            st.markdown("---")
             
             ref_text = question_data.get('2025參考文字_AI預留', '')
             
-            if pd.notna(ref_text) and str(ref_text).strip() != "":
-                # 執行真實 HTML 表格大變身
-                fixed_content = fix_drive_images_and_tables(str(ref_text))
-                st.markdown(fixed_content, unsafe_allow_html=True)
-            else:
-                st.info("*(🚧 系統提示：尚無去年度文字資料，待後台擷取後自動匯入。)*")
+            # 將後台整理好的文字，餵給原生渲染引擎
+            render_native_content(ref_text)
                 
         st.markdown("---")
         
@@ -239,14 +264,15 @@ if not df_questions.empty:
             report_text = st.text_area("✍️ 填報資訊/年度執行亮點成果", height=150, placeholder="請在此輸入您的填寫內容...")
             uploaded_files = st.file_uploader("📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等)：", accept_multiple_files=True)
             
-            submitted = st.form_submit_button("📤 資料確認送出")
+            st.markdown("<div style='display: flex; justify-content: center;'>", unsafe_allow_html=True)
+            submitted = st.form_submit_button("📤 資料確認送出", type="primary")
+            st.markdown("</div>", unsafe_allow_html=True)
             
             if submitted:
                 if not report_text.strip() and not uploaded_files:
                     st.error("⚠️ 請至少填寫成果說明或上傳佐證檔案！")
                 else:
                     st.success("🎉 資料已暫存成功！目前系統畫面設計與邏輯皆已完備。")
-                    st.info("*(準備進入下一階段：將填寫內容寫入資料庫！)*")
 
 elif 'df_questions' in locals() and df_questions.empty:
     st.warning("目前資料庫中沒有題目，請確認 Google Sheet 的「評比題目表」是否已填入資料。")
