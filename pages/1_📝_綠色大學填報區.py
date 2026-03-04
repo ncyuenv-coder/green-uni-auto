@@ -5,28 +5,106 @@ from google.oauth2.credentials import Credentials
 import re
 
 # ==========================================
-# 🪄 魔法轉換器：破解防盜鏈 + 統一照片排版 (兩張一列、固定大小)
+# 🪄 魔法轉換器 2.0：表格自動重建與防盜鏈破解
 # ==========================================
-def fix_drive_images(text):
+def fix_drive_images_and_tables(text):
     if not isinstance(text, str):
         return ""
     
-    # 1. 將傳統的 uc?id 換成隱藏版的 thumbnail API (設定寬度 1000px 確保高畫質)
+    # 1. API 替換
     text = text.replace("https://drive.google.com/uc?id=", "https://drive.google.com/thumbnail?sz=w1000&id=")
     
-    # 2. 移除相鄰圖片之間的「換行符號」，讓它們能在同一行並排
-    text = re.sub(r'(\!\[.*?\]\(.*?\))\s*\n+\s*(?=\!\[.*?\]\(.*?\))', r'\1 ', text)
-    
-    # 3. 轉為 HTML，加入強大的 CSS 樣式
-    # width: 48% (讓兩張圖剛好佔滿一列)
-    # height: 250px (固定高度) 
-    # object-fit: cover (保證圖片比例不變形，多餘部分自動裁切)
-    # display: inline-block (讓圖片並排顯示)
+    # 2. 將 Markdown 圖片標籤轉為 [IMG:url] 方便統一擷取
     pattern = r'!\[.*?\]\((https://drive\.google\.com/thumbnail\?sz=w1000&id=[a-zA-Z0-9_-]+)\)'
-    replacement = r'<img src="\1" referrerpolicy="no-referrer" style="width: 48%; height: 250px; object-fit: cover; border-radius: 8px; margin: 5px 1%; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: inline-block;">'
-    html_text = re.sub(pattern, replacement, text)
+    text = re.sub(pattern, r'[IMG:\1]', text)
     
-    return html_text
+    lines = text.split('\n')
+    final_html = []
+    
+    in_table = False
+    in_row = False
+    current_cell_text = ""
+    current_cell_images = []
+    row_cells = []
+    
+    def close_cell():
+        nonlocal current_cell_text, current_cell_images, row_cells
+        if current_cell_text.strip() or current_cell_images:
+            # 🎯 需求 3：照片在上方、文字對應在照片下方
+            imgs_html = "".join([
+                f'<img src="{img}" referrerpolicy="no-referrer" style="width: 100%; height: auto; border-radius: 6px; margin-bottom: 10px; object-fit: cover; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">' 
+                for img in current_cell_images
+            ])
+            
+            clean_text = current_cell_text.replace('>', '').strip()
+            txt_html = f'<div style="color: #333; font-size: 1em; line-height: 1.6;">{clean_text}</div>' if clean_text else ""
+            
+            # 組裝獨立儲存格：帶有外框與圓角
+            cell_html = f'<div style="flex: 1; min-width: 250px; border: 1px solid #d9d9d9; padding: 15px; border-radius: 8px; background-color: #fcfcfc;">{imgs_html}{txt_html}</div>'
+            row_cells.append(cell_html)
+            current_cell_text = ""
+            current_cell_images = []
+
+    def close_row():
+        nonlocal row_cells, in_row, final_html
+        close_cell()
+        if in_row and row_cells:
+            # 🎯 需求 3：將這列的儲存格用 flexbox 並排，自動依據欄位數量均分空間
+            row_html = f'<div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; width: 100%;">{ "".join(row_cells) }</div>'
+            final_html.append(row_html)
+            row_cells = []
+        in_row = False
+
+    for line in lines:
+        line_str = line.strip()
+        
+        # 🎯 需求 2：過濾並隱藏「表格資料解析」關鍵字
+        if "📊 表格資料解析" in line_str:
+            in_table = True
+            continue
+        
+        if in_table and line_str == "---":
+            close_row()
+            in_table = False
+            continue
+            
+        if in_table:
+            # 🎯 需求 2：隱藏【第 X 列】，並作為換列信號
+            if re.search(r'【第 \d+ 列】', line_str):
+                close_row()
+                in_row = True
+                continue
+            
+            # 🎯 需求 2：隱藏 [欄位 X]：，並作為換格信號
+            col_match = re.search(r'\[欄位 \d+\][*\s]*[:：](.*)', line_str)
+            if col_match:
+                close_cell()
+                current_cell_text = col_match.group(1).strip() + "<br>"
+                continue
+            
+            if '[IMG:' in line_str:
+                imgs = re.findall(r'\[IMG:(.*?)\]', line_str)
+                current_cell_images.extend(imgs)
+                clean_line = re.sub(r'\[IMG:.*?\]', '', line_str).replace('>', '').strip()
+                if clean_line:
+                    current_cell_text += clean_line + "<br>"
+                continue
+                
+            clean_line = line_str.replace('>', '').strip()
+            if clean_line:
+                current_cell_text += clean_line + "<br>"
+        else:
+            # 非表格區塊：保留一般照片的並排邏輯
+            if '[IMG:' in line_str:
+                line = re.sub(r'\[IMG:(.*?)\]', r'<img src="\1" referrerpolicy="no-referrer" style="width: 48%; height: 250px; object-fit: cover; border-radius: 8px; margin: 5px 1%; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">', line)
+            final_html.append(line + "<br>")
+
+    if in_table:
+        close_row()
+
+    result = "".join(final_html)
+    result = re.sub(r'(<br>\s*){3,}', '<br><br>', result)
+    return result
 
 # ==========================================
 # 🛡️ 資安防護罩
@@ -151,25 +229,28 @@ if not df_questions.empty:
         st.markdown(f"<div style='color: black; font-size: 1.1em; padding-left: 5px; margin-bottom: 15px;'><b>中文說明：</b><br>{question_data.get('中文說明', '無')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='morandi-req'><b>🔍 資料需求：</b><br>{question_data.get('資料需求', '無特別說明')}</div>", unsafe_allow_html=True)
         
+        # ==========================================
         # ✨ 優化後的參考資訊區塊
-        with st.expander("💡 點擊展開查看：前一年度 (2025) 參考資訊"):
-            st.write(f"**對應之去年度題目：** {question_data.get('前一年度題目', '無')}")
+        # ==========================================
+        with st.expander("💡 點擊展開查看：前一年度 (2025) 參考資訊", expanded=True):
+            
+            # 🎯 需求 1：乾淨單純的呈現對應去年度題目，刪除原本的 "去年度填報內容 (圖文整合)："
+            st.markdown(f"對應之去年度題目： {question_data.get('前一年度題目', '無')}")
             
             ref_text = question_data.get('2025參考文字_AI預留', '')
-            st.markdown("---")
             
             if pd.notna(ref_text) and str(ref_text).strip() != "":
-                st.markdown("**📝 去年度填報內容 (圖文整合)：**")
-                fixed_content = fix_drive_images(str(ref_text))
+                # 執行 HTML 網格大變身
+                fixed_content = fix_drive_images_and_tables(str(ref_text))
                 st.markdown(fixed_content, unsafe_allow_html=True)
             else:
                 st.info("*(🚧 系統提示：尚無去年度文字資料，待後台擷取後自動匯入。)*")
-            
-            # (舊版的獨立照片顯示區塊已徹底刪除！)
-            
+                
         st.markdown("---")
         
+        # ==========================================
         # 🎯 年度成果填報與資料上傳
+        # ==========================================
         with st.form("report_form"):
             report_text = st.text_area("✍️ 填報資訊/年度執行亮點成果", height=150, placeholder="請在此輸入您的填寫內容...")
             uploaded_files = st.file_uploader("📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等)：", accept_multiple_files=True)
