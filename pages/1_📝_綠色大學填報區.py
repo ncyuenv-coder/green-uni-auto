@@ -5,6 +5,11 @@ from google.oauth2.credentials import Credentials
 import re
 
 # ==========================================
+# 🌟 已經自動為您綁定好的 PDF 檔案 ID
+# ==========================================
+PDF_FILE_ID = "1hXs3yUwNxEiNZkJNeAfDTZjs9jxEgJos"
+
+# ==========================================
 # 🛡️ 資安防護罩
 # ==========================================
 if st.session_state.get("authentication_status") is not True:
@@ -14,7 +19,7 @@ if st.session_state.get("authentication_status") is not True:
 st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", layout="wide")
 
 # ==========================================
-# 🎨 系統 UI 樣式設定
+# 🎨 系統 UI 樣式設定 (保留您原有的，並新增捲軸美化)
 # ==========================================
 st.markdown("""
 <style>
@@ -42,6 +47,21 @@ st.markdown("""
     div.stButton > button:first-child {
         border-radius: 6px !important;
         font-weight: bold !important;
+    }
+    /* ✨ 新增：美化右側翻譯區塊的捲軸 */
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: #f1f1f1; 
+        border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #8F9CA3; 
+        border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #738087; 
     }
 </style>
 """, unsafe_allow_html=True)
@@ -71,123 +91,6 @@ def load_gsheet_data():
     except Exception as e:
         st.error(f"⚠️ 無法讀取 Google Sheet，詳細錯誤：{e}")
         return pd.DataFrame()
-
-# ==========================================
-# 🪄 AI 智慧渲染引擎：自動分辨「照片版面」與「資料表格」
-# ==========================================
-def render_native_content(text):
-    if not isinstance(text, str) or not text.strip():
-        st.info("*(🚧 系統提示：尚無去年度文字資料，待後台擷取後自動匯入。)*")
-        return
-
-    # 將 API 轉換為縮圖高畫質版本
-    text = text.replace("https://drive.google.com/uc?id=", "https://drive.google.com/thumbnail?sz=w1000&id=")
-    lines = text.split('\n')
-    
-    html_output = []
-    in_table = False
-    table_rows = []
-    current_row = []
-    current_cell = None  # 使用 None 來區分「還沒開始讀格子」跟「格子是空的」
-
-    # 單行文字處理器 (處理圖片、粗體、清單項目)
-    def process_line(l):
-        l = l.strip()
-        if not l: return ""
-        
-        # 1. 處理圖片：轉換為 100% 寬度、自動高度的 HTML 標籤
-        def img_repl(m):
-            url = m.group(1)
-            return f'<img src="{url}" referrerpolicy="no-referrer" style="width: 100%; height: auto; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 8px;">'
-        l = re.sub(r'!\[.*?\]\((.*?)\)', img_repl, l)
-        
-        # 2. 處理粗體 (保留字體加粗，移除星號)
-        l = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', l)
-        
-        # 3. 處理項目符號與序號 (完美還原 Word 縮排)
-        if re.match(r'^(\*|-)\s+', l):
-            l = f"<div style='margin-left: 1.5em; text-indent: -1.2em; margin-bottom: 5px;'>• {l[2:]}</div>"
-        elif re.match(r'^(\d+\.)\s+', l):
-            match = re.match(r'^(\d+\.)\s+(.*)', l)
-            l = f"<div style='margin-left: 1.5em; text-indent: -1.5em; margin-bottom: 5px;'>{match.group(1)} {match.group(2)}</div>"
-        else:
-            if not l.startswith('<img'):
-                l = f"<div style='margin-bottom: 6px;'>{l}</div>"
-        return l
-
-    for line in lines:
-        raw_line = line.strip()
-        if raw_line.startswith('>'):
-            raw_line = raw_line[1:].strip()
-            
-        # 偵測到表格開始
-        if "📊" in raw_line or "表格資料解析" in raw_line:
-            in_table = True
-            table_rows = []
-            current_row = []
-            current_cell = None
-            continue
-            
-        # 偵測到表格結束
-        if in_table and raw_line == "---":
-            in_table = False
-            if current_cell is not None: current_row.append(current_cell)
-            if current_row: table_rows.append(current_row)
-            
-            # 🌟 核心魔法：判斷這是哪種表格，並決定怎麼畫它！
-            if table_rows:
-                # 掃描表格內有沒有圖片標籤
-                has_img = any('<img' in c for r in table_rows for c in r)
-                
-                if has_img:
-                    # 📸 這是「照片排版表」：拔掉框線，拿掉底色，文字置中！
-                    tbl = '<table style="width: 100%; border: none; table-layout: fixed; margin-bottom: 25px;">'
-                    for r in table_rows:
-                        tbl += '<tr>'
-                        for c in r:
-                            tbl += f'<td style="border: none; padding: 10px; vertical-align: top; text-align: left;">{c}</td>'
-                        tbl += '</tr>'
-                    tbl += '</table>'
-                else:
-                    # 📊 這是「真實資料表」：畫出漂亮的灰色框線與標題底色！
-                    tbl = '<table style="width: 100%; border-collapse: collapse; border: 1px solid #D9E0E3; margin-bottom: 25px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">'
-                    for i, r in enumerate(table_rows):
-                        tbl += '<tr>'
-                        bg = "#F8FAFB" if i == 0 else "#FFFFFF"
-                        for c in r:
-                            tbl += f'<td style="border: 1px solid #D9E0E3; padding: 12px; vertical-align: top; background-color: {bg}; font-size: 0.95em; color: #34495E;">{c}</td>'
-                        tbl += '</tr>'
-                    tbl += '</table>'
-                html_output.append(tbl)
-            continue
-            
-        if in_table:
-            # 換列訊號
-            if re.search(r'【第 \d+ 列】', raw_line):
-                if current_cell is not None: current_row.append(current_cell)
-                if current_row: table_rows.append(current_row)
-                current_row = []
-                current_cell = None
-                continue
-                
-            # 換格訊號
-            col_match = re.search(r'\[?(欄位|Column)\s*\d+\]?[*\s]*[:：]?(.*)', raw_line, re.IGNORECASE)
-            if col_match:
-                if current_cell is not None: current_row.append(current_cell)
-                current_cell = process_line(col_match.group(2))
-                continue
-            
-            # 填入格子內容
-            if current_cell is not None and raw_line:
-                current_cell += process_line(raw_line)
-        else:
-            # 一般文字 (非表格)
-            if raw_line:
-                html_output.append(f"<div style='line-height: 1.6; color: #2C3E50; font-size: 1.05em;'>{process_line(raw_line)}</div>")
-
-    # 把最後的結果印在畫面上
-    st.markdown("".join(html_output), unsafe_allow_html=True)
-
 
 # ==========================================
 # 🚀 網頁主畫面
@@ -227,15 +130,38 @@ if not df_questions.empty:
         st.markdown(f"<div style='color: black; font-size: 1.1em; padding-left: 5px; margin-bottom: 15px;'><b>中文說明：</b><br>{question_data.get('中文說明', '無')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='morandi-req'><b>🔍 資料需求：</b><br>{question_data.get('資料需求', '無特別說明')}</div>", unsafe_allow_html=True)
         
+        # ==========================================
+        # ✨ 精準替換區：雙軌對照法 (左邊 PDF 原檔，右邊純文字翻譯)
+        # ==========================================
         with st.expander("💡 點擊展開查看：前一年度 (2025) 參考資訊", expanded=True):
             st.markdown(f"**對應之去年度題目：** {question_data.get('前一年度題目', '無')}")
             st.markdown("---")
             
-            ref_text = question_data.get('2025參考文字_AI預留', '')
-            render_native_content(ref_text)
+            # 建立左右兩個欄位
+            col_pdf, col_trans = st.columns([1, 1])
+            
+            # 【左側：原檔 PDF】
+            with col_pdf:
+                st.markdown("#### 📄 原始排版 (2024年原檔)")
+                pdf_url = f"https://drive.google.com/file/d/{PDF_FILE_ID}/preview"
+                st.markdown(f'<iframe src="{pdf_url}" width="100%" height="600" style="border: 2px solid #8F9CA3; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></iframe>', unsafe_allow_html=True)
+                st.caption("🔍 小提示：您可以在文件內滑動，或使用上方工具列放大/縮小尋找對應題號。")
+            
+            # 【右側：中文翻譯】
+            with col_trans:
+                st.markdown("#### 🇹🇼 中文翻譯參考")
+                ref_text = question_data.get('2025參考文字_AI預留', '')
+                if pd.notna(ref_text) and str(ref_text).strip() != "":
+                    # 建立一個帶有卷軸、底色、且保留換行格式的文字區塊 (white-space: pre-wrap 是保留換行的魔法)
+                    st.markdown(f'<div class="custom-scrollbar" style="background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 2px solid #E2E7E3; height: 600px; overflow-y: auto; line-height: 1.8; font-size: 1.05em; color: #2C3E50; white-space: pre-wrap; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);">{ref_text}</div>', unsafe_allow_html=True)
+                else:
+                    st.info("*(🚧 系統提示：本題尚無去年度文字資料，或原檔中未提供。)*")
                 
         st.markdown("---")
         
+        # ==========================================
+        # 🎯 年度成果填報與資料上傳 (完全保留您的邏輯)
+        # ==========================================
         with st.form("report_form"):
             report_text = st.text_area("✍️ 填報資訊/年度執行亮點成果", height=150, placeholder="請在此輸入您的填寫內容...")
             uploaded_files = st.file_uploader("📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等)：", accept_multiple_files=True)
