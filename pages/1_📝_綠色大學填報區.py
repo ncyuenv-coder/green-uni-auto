@@ -73,7 +73,7 @@ def load_gsheet_data():
         return pd.DataFrame()
 
 # ==========================================
-# 🪄 超級渲染引擎：深度解析 + 完美排版
+# 🪄 終極超級渲染引擎：純正 HTML 建構與完美解析
 # ==========================================
 def render_native_content(text):
     if not isinstance(text, str) or not text.strip():
@@ -81,141 +81,101 @@ def render_native_content(text):
         return
 
     lines = text.split('\n')
-    ui_blocks = []
+    html = []
+    in_table = False
+    current_cell_html = []
     
-    current_table = None
-    current_row = None
-    current_cell = None
-    standalone_images = []
+    def process_line(line_str):
+        line_str = line_str.strip()
+        if not line_str: return ""
+        
+        # 1. 處理項目符號 (完美還原 Word 縮排)
+        is_bullet = False
+        if line_str.startswith('* ') or line_str.startswith('- '):
+            line_str = f"<div style='margin-left: 1.5em; text-indent: -1.5em; margin-bottom: 5px;'>• {line_str[2:]}</div>"
+            is_bullet = True
+        elif re.match(r'^\d+\.\s', line_str):
+            line_str = f"<div style='margin-left: 1.5em; text-indent: -1.5em; margin-bottom: 5px;'>{line_str}</div>"
+            is_bullet = True
+            
+        # 2. 處理圖片 (保證 2 張並排、不裁切)
+        def img_repl(match):
+            url = match.group(1).replace("uc?id=", "thumbnail?sz=w1000&id=")
+            # 🌟 魔法核心：width 設定 48%，保證兩兩並排；height: auto 保證不裁切！
+            return f'<img src="{url}" referrerpolicy="no-referrer" style="width: calc(50% - 10px); min-width: 150px; height: auto; margin: 5px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.15); display: inline-block; vertical-align: top;">'
+            
+        original_line = line_str
+        line_str = re.sub(r'!\[.*?\]\((.*?)\)', img_repl, line_str)
+        line_str = line_str.replace('**', '') # 移除 Markdown 粗體星號
+        
+        # 3. 如果這行是純文字，包裝成 div 確保段落換行
+        if not is_bullet and '<img' not in line_str:
+            line_str = f"<div style='margin-bottom: 8px; line-height: 1.6;'>{line_str}</div>"
+            
+        return line_str
 
-    def flush_standalone_images():
-        if standalone_images:
-            ui_blocks.append({"type": "images", "urls": list(standalone_images)})
-            standalone_images.clear()
-
-    # 🌟 深度解析函數：不管文字跟圖片怎麼混雜，保證完美分離
-    def extract_items(line_string):
-        items = []
-        # 精準匹配 Markdown 圖片語法 ![...](...)
-        parts = re.split(r'(!\[[^\]]*\]\s*\([^\)]+\))', line_string)
-        for part in parts:
-            part = part.strip()
-            if not part: continue
-            if part.startswith('!['):
-                url_match = re.search(r'\(\s*(.*?)\s*\)', part)
-                if url_match:
-                    thumb_url = url_match.group(1).replace("uc?id=", "thumbnail?sz=w1000&id=")
-                    items.append({"type": "image", "url": thumb_url})
-            else:
-                clean_txt = part.replace('**', '').strip()
-                if clean_txt:
-                    items.append({"type": "text", "content": clean_txt})
-        return items
-
-    # --- 1. 資料解析與結構化 ---
     for line in lines:
-        line_str = line.strip()
-        if line_str.startswith('>'):
-            line_str = line_str[1:].strip()
+        line = line.strip()
+        if line.startswith('>'):
+            line = line[1:].strip()
             
-        if "📊" in line_str or "表格資料解析" in line_str:
-            flush_standalone_images()
-            current_table = []
-            ui_blocks.append({"type": "table", "rows": current_table})
+        # 偵測表格開頭
+        if "📊" in line or "表格資料解析" in line:
+            if in_table:
+                if current_cell_html: html.append("".join(current_cell_html) + "</td>")
+                html.append("</tr></table>")
+            in_table = True
+            current_cell_html = []
+            # 建立表格外框
+            html.append('<table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; border: 2px solid #8F9CA3; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font-size: 1.05em;">')
             continue
             
-        if current_table is not None and line_str == "---":
-            current_table = None
-            current_row = None
-            current_cell = None
+        # 偵測表格結尾
+        if in_table and line == "---":
+            if current_cell_html: html.append("".join(current_cell_html) + "</td>")
+            html.append("</tr></table>")
+            in_table = False
+            current_cell_html = []
             continue
             
-        if current_table is not None:
-            if re.search(r'【第 \d+ 列】', line_str):
-                current_row = []
-                current_table.append(current_row)
-                current_cell = None
+        if in_table:
+            # 偵測換列
+            if re.search(r'【第 \d+ 列】', line):
+                if current_cell_html: 
+                    html.append("".join(current_cell_html) + "</td>")
+                    current_cell_html = []
+                if html and html[-1].endswith("</td>"):
+                    html.append("</tr>")
+                html.append('<tr style="border-bottom: 1px solid #D9E0E3;">')
                 continue
                 
-            # 偵測欄位開頭
-            col_match = re.search(r'\[?(欄位|Column)\s*\d+\]?[*\s]*[:：]?(.*)', line_str, re.IGNORECASE)
-            if col_match:
-                current_cell = []
-                if current_row is not None:
-                    current_row.append(current_cell)
-                text_content = col_match.group(2).strip()
-                if text_content:
-                    current_cell.extend(extract_items(text_content))
+            # 偵測換格 (欄位)
+            if "[欄位" in line or "[Column" in line:
+                if current_cell_html: 
+                    html.append("".join(current_cell_html) + "</td>")
+                    current_cell_html = []
+                # 建立儲存格
+                html.append("<td style='border: 1px solid #D9E0E3; padding: 15px; vertical-align: top; background-color: #FFFFFF; color: #2C3E50;'>")
+                
+                # 擷取欄位標籤後的文字
+                text_part = re.sub(r'\[?(欄位|Column)\s*\d+\]?[*\s]*[:：]?', '', line).strip()
+                if text_part:
+                    current_cell_html.append(process_line(text_part))
                 continue
             
-            # 處理一般表格內容
-            if current_cell is not None:
-                current_cell.extend(extract_items(line_str))
-                
+            # 表格內的正常內容
+            if line:
+                current_cell_html.append(process_line(line))
         else:
-            # 非表格區塊
-            items = extract_items(line_str)
-            for item in items:
-                if item["type"] == "image":
-                    standalone_images.append(item["url"])
-                else:
-                    flush_standalone_images()
-                    ui_blocks.append(item)
-
-    flush_standalone_images()
-
-    # --- 2. HTML 畫布繪製 ---
-    html_parts = []
-    for block in ui_blocks:
-        if block["type"] == "text":
-            txt = block["content"]
-            # 🌟 完美還原 Word 縮排與條列符號
-            if txt.startswith('* ') or txt.startswith('- '):
-                txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>• {txt[2:]}</div>"
-            elif re.match(r'^\d+\.\s', txt):
-                txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>{txt}</div>"
-            else:
-                txt = f"<div style='margin-bottom: 8px;'>{txt}</div>"
-            html_parts.append(f'<div style="line-height: 1.6; color: #2C3E50; font-size: 1.05em;">{txt}</div>')
-            
-        elif block["type"] == "images":
-            # 🌟 Flexbox 兩張並排：保證在所有裝置上都不會跑版，且原比例顯示！
-            html_parts.append('<div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;">')
-            for url in block["urls"]:
-                html_parts.append(f'<div style="flex: 1 1 calc(50% - 15px); min-width: 250px;"><img src="{url}" referrerpolicy="no-referrer" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: block;"></div>')
-            html_parts.append('</div>')
-            
-        elif block["type"] == "table":
-            # 🌟 鎖定欄寬的標準 HTML 表格
-            html_parts.append('<table style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 25px; border: 2px solid #8F9CA3; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">')
-            for r_idx, row in enumerate(block["rows"]):
-                if not row: continue
-                html_parts.append('<tr style="border-bottom: 1px solid #D9E0E3;">')
-                col_width = f"{100/len(row)}%"
-                for c_idx, cell_contents in enumerate(row):
-                    bg_color = "#F4F6F7" if r_idx == 0 else "#FFFFFF"
-                    html_parts.append(f'<td style="border: 1px solid #D9E0E3; padding: 15px; vertical-align: top; width: {col_width}; background-color: {bg_color}; word-wrap: break-word;">')
-                    
-                    for item in cell_contents:
-                        if item["type"] == "text":
-                            txt = item["content"]
-                            if txt.startswith('* ') or txt.startswith('- '):
-                                txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>• {txt[2:]}</div>"
-                            elif re.match(r'^\d+\.\s', txt):
-                                txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>{txt}</div>"
-                            else:
-                                txt = f"<div style='margin-bottom: 6px;'>{txt}</div>"
-                            html_parts.append(f'<div style="color: #34495E; font-size: 0.95em; line-height: 1.5;">{txt}</div>')
-                        
-                        elif item["type"] == "image":
-                            # 表格內照片：原比例顯示不裁切
-                            html_parts.append(f'<img src="{item["url"]}" referrerpolicy="no-referrer" style="width: 100%; height: auto; display: block; margin: 10px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">')
-                            
-                    html_parts.append('</td>')
-                html_parts.append('</tr>')
-            html_parts.append('</table>')
-
-    st.markdown("".join(html_parts), unsafe_allow_html=True)
+            # 非表格區塊的內容
+            if line:
+                html.append(f"<div style='color: #2C3E50; font-size: 1.05em;'>{process_line(line)}</div>")
+                
+    if in_table:
+        if current_cell_html: html.append("".join(current_cell_html) + "</td>")
+        html.append("</tr></table>")
+        
+    st.markdown("".join(html), unsafe_allow_html=True)
 
 
 # ==========================================
