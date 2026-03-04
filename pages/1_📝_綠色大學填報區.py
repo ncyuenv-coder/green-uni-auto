@@ -19,7 +19,7 @@ if st.session_state.get("authentication_status") is not True:
 st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", layout="wide")
 
 # ==========================================
-# 🎨 系統 UI 樣式設定 (保留您原有的，並新增捲軸美化)
+# 🎨 系統 UI 樣式設定
 # ==========================================
 st.markdown("""
 <style>
@@ -33,22 +33,36 @@ st.markdown("""
         margin-bottom: 5px;
         margin-top: 15px;
     }
-    .morandi-req {
+    /* 🌟 新增：放大版的資料需求區塊 */
+    .morandi-req-large {
         background-color: #E2E7E3;
         color: #2C3E50;
-        padding: 15px;
-        border-left: 6px solid #8F9CA3;
-        border-radius: 5px;
-        margin-top: 10px;
+        padding: 20px;
+        border-left: 8px solid #8F9CA3;
+        border-radius: 6px;
+        margin-top: 25px;
         margin-bottom: 15px;
         line-height: 1.6;
-        font-size: 1.05em;
+        font-size: 1.25em; /* 字體放大 */
+    }
+    /* 🌟 新增：填報區專用的莫蘭迪大標題 */
+    .morandi-form-header {
+        background-color: #8F9CA3;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 6px;
+        font-weight: bold;
+        font-size: 1.3em;
+        margin-bottom: 10px;
+        margin-top: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     div.stButton > button:first-child {
         border-radius: 6px !important;
         font-weight: bold !important;
+        font-size: 1.1em !important;
+        padding: 10px 24px !important;
     }
-    /* ✨ 新增：美化右側翻譯區塊的捲軸 */
     .custom-scrollbar::-webkit-scrollbar {
         width: 8px;
     }
@@ -128,45 +142,45 @@ if not df_questions.empty:
         
         st.markdown(f"<div class='morandi-title'>📖 {question_data.get('當年度題目')}：{question_data.get('中文標題')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div style='color: black; font-size: 1.1em; padding-left: 5px; margin-bottom: 15px;'><b>中文說明：</b><br>{question_data.get('中文說明', '無')}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='morandi-req'><b>🔍 資料需求：</b><br>{question_data.get('資料需求', '無特別說明')}</div>", unsafe_allow_html=True)
         
         # ==========================================
-        # ✨ 精準替換區：雙軌對照法 (左邊 PDF 原檔，右邊純文字翻譯)
+        # ✨ 雙軌對照法：左邊 PDF 原檔，右邊純文字翻譯
         # ==========================================
         with st.expander("💡 點擊展開查看：前一年度 (2025) 參考資訊", expanded=True):
             st.markdown(f"**對應之去年度題目：** {question_data.get('前一年度題目', '無')}")
             st.markdown("---")
             
-            # 建立左右兩個欄位
             col_pdf, col_trans = st.columns([1, 1])
             
-            # 【左側：原檔 PDF】
             with col_pdf:
                 st.markdown("#### 📄 原始排版 (2024年原檔)")
                 pdf_url = f"https://drive.google.com/file/d/{PDF_FILE_ID}/preview"
                 st.markdown(f'<iframe src="{pdf_url}" width="100%" height="600" style="border: 2px solid #8F9CA3; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></iframe>', unsafe_allow_html=True)
                 st.caption("🔍 小提示：您可以在文件內滑動，或使用上方工具列放大/縮小尋找對應題號。")
             
-            # 【右側：中文翻譯】
             with col_trans:
                 st.markdown("#### 🇹🇼 中文翻譯參考")
                 ref_text = question_data.get('2025參考文字_AI預留', '')
                 if pd.notna(ref_text) and str(ref_text).strip() != "":
-                    # 建立一個帶有卷軸、底色、且保留換行格式的文字區塊 (white-space: pre-wrap 是保留換行的魔法)
                     st.markdown(f'<div class="custom-scrollbar" style="background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 2px solid #E2E7E3; height: 600px; overflow-y: auto; line-height: 1.8; font-size: 1.05em; color: #2C3E50; white-space: pre-wrap; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);">{ref_text}</div>', unsafe_allow_html=True)
                 else:
                     st.info("*(🚧 系統提示：本題尚無去年度文字資料，或原檔中未提供。)*")
-                
-        st.markdown("---")
         
         # ==========================================
-        # 🎯 年度成果填報與資料上傳 (完全保留您的邏輯)
+        # 🎯 填報區塊 (已升級：移入資料需求 + 莫蘭迪顯眼標題)
         # ==========================================
+        # 移下來並放大的「資料需求」
+        st.markdown(f"<div class='morandi-req-large'><b>🔍 資料需求：</b><br>{question_data.get('資料需求', '無特別說明')}</div>", unsafe_allow_html=True)
+        
         with st.form("report_form"):
-            report_text = st.text_area("✍️ 填報資訊/年度執行亮點成果", height=150, placeholder="請在此輸入您的填寫內容...")
-            uploaded_files = st.file_uploader("📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等)：", accept_multiple_files=True)
+            st.markdown("<div class='morandi-form-header'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
+            # 使用 label_visibility="collapsed" 把原本灰灰小小標題藏起來
+            report_text = st.text_area("填報資訊", height=200, placeholder="請在此輸入您的填寫內容...", label_visibility="collapsed")
             
-            st.markdown("<div style='display: flex; justify-content: center;'>", unsafe_allow_html=True)
+            st.markdown("<div class='morandi-form-header'>📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等)</div>", unsafe_allow_html=True)
+            uploaded_files = st.file_uploader("上傳檔案", accept_multiple_files=True, label_visibility="collapsed")
+            
+            st.markdown("<br><div style='display: flex; justify-content: center;'>", unsafe_allow_html=True)
             submitted = st.form_submit_button("📤 資料確認送出", type="primary")
             st.markdown("</div>", unsafe_allow_html=True)
             
