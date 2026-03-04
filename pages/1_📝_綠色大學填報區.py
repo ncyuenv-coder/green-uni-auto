@@ -73,7 +73,7 @@ def load_gsheet_data():
         return pd.DataFrame()
 
 # ==========================================
-# 🪄 超級渲染引擎：原比例防裁切 + 項目符號還原
+# 🪄 超級渲染引擎：深度解析 + 完美排版
 # ==========================================
 def render_native_content(text):
     if not isinstance(text, str) or not text.strip():
@@ -92,6 +92,25 @@ def render_native_content(text):
         if standalone_images:
             ui_blocks.append({"type": "images", "urls": list(standalone_images)})
             standalone_images.clear()
+
+    # 🌟 深度解析函數：不管文字跟圖片怎麼混雜，保證完美分離
+    def extract_items(line_string):
+        items = []
+        # 精準匹配 Markdown 圖片語法 ![...](...)
+        parts = re.split(r'(!\[[^\]]*\]\s*\([^\)]+\))', line_string)
+        for part in parts:
+            part = part.strip()
+            if not part: continue
+            if part.startswith('!['):
+                url_match = re.search(r'\(\s*(.*?)\s*\)', part)
+                if url_match:
+                    thumb_url = url_match.group(1).replace("uc?id=", "thumbnail?sz=w1000&id=")
+                    items.append({"type": "image", "url": thumb_url})
+            else:
+                clean_txt = part.replace('**', '').strip()
+                if clean_txt:
+                    items.append({"type": "text", "content": clean_txt})
+        return items
 
     # --- 1. 資料解析與結構化 ---
     for line in lines:
@@ -118,83 +137,65 @@ def render_native_content(text):
                 current_cell = None
                 continue
                 
+            # 偵測欄位開頭
             col_match = re.search(r'\[?(欄位|Column)\s*\d+\]?[*\s]*[:：]?(.*)', line_str, re.IGNORECASE)
             if col_match:
                 current_cell = []
                 if current_row is not None:
                     current_row.append(current_cell)
-                text_content = col_match.group(2).replace('**', '').strip() # 僅移除加粗標記，保留項目符號
+                text_content = col_match.group(2).strip()
                 if text_content:
-                    current_cell.append({"type": "text", "content": text_content})
+                    current_cell.extend(extract_items(text_content))
                 continue
             
+            # 處理一般表格內容
             if current_cell is not None:
-                # 使用正則表達式分離圖片與文字，確保順序完全一致
-                parts = re.split(r'(!\[.*?\]\([^\)]+\))', line_str)
-                for part in parts:
-                    part = part.strip()
-                    if not part: continue
-                    if part.startswith('!['):
-                        url_match = re.search(r'\((.*?)\)', part)
-                        if url_match:
-                            thumb_url = url_match.group(1).replace("uc?id=", "thumbnail?sz=w1000&id=")
-                            current_cell.append({"type": "image", "url": thumb_url})
-                    else:
-                        clean_txt = part.replace('**', '').strip()
-                        if clean_txt:
-                            current_cell.append({"type": "text", "content": clean_txt})
-                            
+                current_cell.extend(extract_items(line_str))
+                
         else:
             # 非表格區塊
-            parts = re.split(r'(!\[.*?\]\([^\)]+\))', line_str)
-            for part in parts:
-                part = part.strip()
-                if not part: continue
-                if part.startswith('!['):
-                    url_match = re.search(r'\((.*?)\)', part)
-                    if url_match:
-                        thumb_url = url_match.group(1).replace("uc?id=", "thumbnail?sz=w1000&id=")
-                        standalone_images.append(thumb_url)
+            items = extract_items(line_str)
+            for item in items:
+                if item["type"] == "image":
+                    standalone_images.append(item["url"])
                 else:
-                    clean_txt = part.replace('**', '').strip()
-                    if clean_txt:
-                        flush_standalone_images()
-                        ui_blocks.append({"type": "text", "content": clean_txt})
+                    flush_standalone_images()
+                    ui_blocks.append(item)
 
     flush_standalone_images()
 
     # --- 2. HTML 畫布繪製 ---
-    html_str = ""
+    html_parts = []
     for block in ui_blocks:
         if block["type"] == "text":
-            txt = block["content"].replace('\n', '<br>')
-            # 🌟 項目符號完美還原機制
+            txt = block["content"]
+            # 🌟 完美還原 Word 縮排與條列符號
             if txt.startswith('* ') or txt.startswith('- '):
                 txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>• {txt[2:]}</div>"
             elif re.match(r'^\d+\.\s', txt):
                 txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>{txt}</div>"
             else:
                 txt = f"<div style='margin-bottom: 8px;'>{txt}</div>"
-            html_str += f'<div style="line-height: 1.6; color: #2C3E50; font-size: 1.05em;">{txt}</div>'
+            html_parts.append(f'<div style="line-height: 1.6; color: #2C3E50; font-size: 1.05em;">{txt}</div>')
             
         elif block["type"] == "images":
-            # 🌟 非表格圖片：CSS Grid 強制 2 張並排，高度 auto 絕不裁切！
-            html_str += '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px; align-items: start;">'
+            # 🌟 Flexbox 兩張並排：保證在所有裝置上都不會跑版，且原比例顯示！
+            html_parts.append('<div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;">')
             for url in block["urls"]:
-                html_str += f'<img src="{url}" referrerpolicy="no-referrer" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">'
-            html_str += '</div>'
+                html_parts.append(f'<div style="flex: 1 1 calc(50% - 15px); min-width: 250px;"><img src="{url}" referrerpolicy="no-referrer" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: block;"></div>')
+            html_parts.append('</div>')
             
         elif block["type"] == "table":
-            # 🌟 表格：table-layout: fixed 強制鎖定欄寬，文字絕對不變形！
-            html_str += '<table style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 25px; border: 2px solid #8F9CA3; border-radius: 4px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">'
+            # 🌟 鎖定欄寬的標準 HTML 表格
+            html_parts.append('<table style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 25px; border: 2px solid #8F9CA3; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">')
             for r_idx, row in enumerate(block["rows"]):
-                html_str += '<tr style="border-bottom: 1px solid #D9E0E3;">'
-                col_width = f"{100/len(row)}%" if row else "100%"
+                if not row: continue
+                html_parts.append('<tr style="border-bottom: 1px solid #D9E0E3;">')
+                col_width = f"{100/len(row)}%"
                 for c_idx, cell_contents in enumerate(row):
                     bg_color = "#F4F6F7" if r_idx == 0 else "#FFFFFF"
-                    html_str += f'<td style="border: 1px solid #D9E0E3; padding: 15px; vertical-align: top; width: {col_width}; background-color: {bg_color}; word-wrap: break-word;">'
+                    html_parts.append(f'<td style="border: 1px solid #D9E0E3; padding: 15px; vertical-align: top; width: {col_width}; background-color: {bg_color}; word-wrap: break-word;">')
                     
-                    # 依序精準輸出該欄位內的所有圖片與文字
                     for item in cell_contents:
                         if item["type"] == "text":
                             txt = item["content"]
@@ -204,17 +205,17 @@ def render_native_content(text):
                                 txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>{txt}</div>"
                             else:
                                 txt = f"<div style='margin-bottom: 6px;'>{txt}</div>"
-                            html_str += f'<div style="color: #34495E; font-size: 0.95em; line-height: 1.5;">{txt}</div>'
+                            html_parts.append(f'<div style="color: #34495E; font-size: 0.95em; line-height: 1.5;">{txt}</div>')
                         
                         elif item["type"] == "image":
-                            # 🌟 表格內圖片：100% 寬度，高度 auto 原比例縮放，絕不裁切！
-                            html_str += f'<img src="{item["url"]}" referrerpolicy="no-referrer" style="width: 100%; height: auto; display: block; margin: 10px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">'
+                            # 表格內照片：原比例顯示不裁切
+                            html_parts.append(f'<img src="{item["url"]}" referrerpolicy="no-referrer" style="width: 100%; height: auto; display: block; margin: 10px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">')
                             
-                    html_str += '</td>'
-                html_str += '</tr>'
-            html_str += '</table>'
+                    html_parts.append('</td>')
+                html_parts.append('</tr>')
+            html_parts.append('</table>')
 
-    st.markdown(html_str, unsafe_allow_html=True)
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
 # ==========================================
