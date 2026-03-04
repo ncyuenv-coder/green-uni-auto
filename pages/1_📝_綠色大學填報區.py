@@ -2,23 +2,34 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.credentials import Credentials
-import re  # 🌟 新增：用於正規表達式替換
+import re
 
 # ==========================================
-# 🪄 魔法轉換器：破解 Google Drive 圖片防盜鏈
+# 🪄 魔法轉換器：破解防盜鏈 + 統一照片排版 (兩張一列、固定大小)
 # ==========================================
 def fix_drive_images(text):
     if not isinstance(text, str):
         return ""
-    # 1. 將傳統的 uc?id 換成隱藏版的 thumbnail API (並設定寬度為 1000px 確保高畫質)
+    
+    # 1. 將傳統的 uc?id 換成隱藏版的 thumbnail API (設定寬度 1000px 確保高畫質)
     text = text.replace("https://drive.google.com/uc?id=", "https://drive.google.com/thumbnail?sz=w1000&id=")
-    # 2. 將 Markdown 的圖片語法強制轉為 HTML，並加上防盜鏈破解 (referrerpolicy="no-referrer")
+    
+    # 2. 移除相鄰圖片之間的「換行符號」，讓它們能在同一行並排
+    text = re.sub(r'(\!\[.*?\]\(.*?\))\s*\n+\s*(?=\!\[.*?\]\(.*?\))', r'\1 ', text)
+    
+    # 3. 轉為 HTML，加入強大的 CSS 樣式
+    # width: 48% (讓兩張圖剛好佔滿一列)
+    # height: 250px (固定高度) 
+    # object-fit: cover (保證圖片比例不變形，多餘部分自動裁切)
+    # display: inline-block (讓圖片並排顯示)
     pattern = r'!\[.*?\]\((https://drive\.google\.com/thumbnail\?sz=w1000&id=[a-zA-Z0-9_-]+)\)'
-    html_text = re.sub(pattern, r'<img src="\1" referrerpolicy="no-referrer" style="max-width: 100%; border-radius: 8px; margin: 10px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">', text)
+    replacement = r'<img src="\1" referrerpolicy="no-referrer" style="width: 48%; height: 250px; object-fit: cover; border-radius: 8px; margin: 5px 1%; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: inline-block;">'
+    html_text = re.sub(pattern, replacement, text)
+    
     return html_text
 
 # ==========================================
-# 🛡️ 資安防護罩：檢查是否已登入
+# 🛡️ 資安防護罩
 # ==========================================
 if st.session_state.get("authentication_status") is not True:
     st.warning("⚠️ 請先至首頁登入系統！")
@@ -27,11 +38,10 @@ if st.session_state.get("authentication_status") is not True:
 st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", layout="wide")
 
 # ==========================================
-# 🎨 系統 UI 樣式設定 (莫蘭迪色系與排版)
+# 🎨 系統 UI 樣式設定
 # ==========================================
 st.markdown("""
 <style>
-    /* 莫蘭迪灰藍色標題區塊 */
     .morandi-title {
         background-color: #8F9CA3;
         color: white;
@@ -42,8 +52,6 @@ st.markdown("""
         margin-bottom: 5px;
         margin-top: 15px;
     }
-    
-    /* 莫蘭迪淺灰綠色 - 資料需求區塊 */
     .morandi-req {
         background-color: #E2E7E3;
         color: #2C3E50;
@@ -55,8 +63,6 @@ st.markdown("""
         line-height: 1.6;
         font-size: 1.05em;
     }
-
-    /* 莫蘭迪橘色 - 置中送出按鈕 */
     div.stButton {
         display: flex;
         justify-content: center;
@@ -108,7 +114,7 @@ def load_gsheet_data():
         return pd.DataFrame()
 
 # ==========================================
-# 🚀 網頁主畫面：填報介面設計
+# 🚀 網頁主畫面
 # ==========================================
 st.title("📝 嘉大綠色大學填報區")
 
@@ -123,20 +129,14 @@ if not df_questions.empty:
         st.error(f"⚠️ Google Sheet 找不到以下欄位：{', '.join(missing_columns)}")
         st.stop()
         
-    # ==========================================
-    # 🎯 選擇單位與題目
-    # ==========================================
     unit_list = df_questions['權責單位'].dropna().unique().tolist()
     unit_list = [str(u).strip() for u in unit_list if str(u).strip() != '']
     
-    # 步驟一：選擇單位
     st.markdown("<div class='morandi-title'>🏢 請選擇您的單位</div>", unsafe_allow_html=True)
     selected_unit = st.selectbox("", ["請選擇..."] + unit_list, label_visibility="collapsed")
     
     if selected_unit != "請選擇...":
         df_unit_questions = df_questions[df_questions['權責單位'].astype(str).str.strip() == selected_unit].copy()
-        
-        # 步驟二：選擇填報項目 (當年度題目 - 中文標題)
         df_unit_questions['選項標示'] = df_unit_questions['當年度題目'].astype(str) + " - " + df_unit_questions['中文標題'].astype(str)
         
         st.markdown("<div class='morandi-title'>📌 請選擇填報項目</div>", unsafe_allow_html=True)
@@ -147,70 +147,33 @@ if not df_questions.empty:
         
         st.markdown("---")
         
-        # ==========================================
-        # 🎯 顯示題目詳細資訊
-        # ==========================================
-        # 1. 填報項目顯示標題 (當年度題目：中文標題)
         st.markdown(f"<div class='morandi-title'>📖 {question_data.get('當年度題目')}：{question_data.get('中文標題')}</div>", unsafe_allow_html=True)
-        
-        # 2. 中文說明 (黑色字體)
         st.markdown(f"<div style='color: black; font-size: 1.1em; padding-left: 5px; margin-bottom: 15px;'><b>中文說明：</b><br>{question_data.get('中文說明', '無')}</div>", unsafe_allow_html=True)
-        
-        # 3. 資料需求 (莫蘭迪區塊)
         st.markdown(f"<div class='morandi-req'><b>🔍 資料需求：</b><br>{question_data.get('資料需求', '無特別說明')}</div>", unsafe_allow_html=True)
         
-        # 4. 前一年度參考資訊 (摺疊展開) - ✨ 本次更新重點區域
+        # ✨ 優化後的參考資訊區塊
         with st.expander("💡 點擊展開查看：前一年度 (2025) 參考資訊"):
             st.write(f"**對應之去年度題目：** {question_data.get('前一年度題目', '無')}")
             
-            # 安全讀取預留欄位 (使用 pd.notna 避免讀到空值報錯)
             ref_text = question_data.get('2025參考文字_AI預留', '')
-            ref_img_urls = question_data.get('2025參考圖片連結_AI預留', '')
-            
             st.markdown("---")
             
-            # 🌟 這裡套用了魔法轉換器！顯示圖文並茂的翻譯內容
             if pd.notna(ref_text) and str(ref_text).strip() != "":
                 st.markdown("**📝 去年度填報內容 (圖文整合)：**")
-                # 將文字送進魔法轉換器清洗，然後允許 HTML 語法生效
                 fixed_content = fix_drive_images(str(ref_text))
                 st.markdown(fixed_content, unsafe_allow_html=True)
             else:
                 st.info("*(🚧 系統提示：尚無去年度文字資料，待後台擷取後自動匯入。)*")
-                
-            # (保留您原本的圖片欄位邏輯以防萬一，但因為我們現在已經把圖片融合進文字裡，這裡通常會是空的)
-            if pd.notna(ref_img_urls) and str(ref_img_urls).strip() != "":
-                st.markdown("**📸 附加佐證照片：**")
-                urls = [url.strip() for url in str(ref_img_urls).split(',') if url.strip()]
-                if urls:
-                    cols = st.columns(len(urls))
-                    for idx, col in enumerate(cols):
-                        with col:
-                            try:
-                                st.image(urls[idx], use_container_width=True)
-                            except Exception as e:
-                                st.error("⚠️ 圖片載入失敗，請確認網址是否正確。")
+            
+            # (舊版的獨立照片顯示區塊已徹底刪除！)
             
         st.markdown("---")
         
-        # ==========================================
         # 🎯 年度成果填報與資料上傳
-        # ==========================================
         with st.form("report_form"):
-            # A. 填報資訊/年度執行亮點成果
-            report_text = st.text_area(
-                "✍️ 填報資訊/年度執行亮點成果", 
-                height=150, 
-                placeholder="請在此輸入您的填寫內容..."
-            )
+            report_text = st.text_area("✍️ 填報資訊/年度執行亮點成果", height=150, placeholder="請在此輸入您的填寫內容...")
+            uploaded_files = st.file_uploader("📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等)：", accept_multiple_files=True)
             
-            # B. 上傳照片或佐證檔案
-            uploaded_files = st.file_uploader(
-                "📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等)：", 
-                accept_multiple_files=True
-            )
-            
-            # 5. 資料確認送出按鈕
             submitted = st.form_submit_button("📤 資料確認送出")
             
             if submitted:
@@ -218,7 +181,7 @@ if not df_questions.empty:
                     st.error("⚠️ 請至少填寫成果說明或上傳佐證檔案！")
                 else:
                     st.success("🎉 資料已暫存成功！目前系統畫面設計與邏輯皆已完備。")
-                    st.info("*(準備進入下一階段：我們將把這些填寫的內容與檔案，自動寫入 Google Sheet 資料庫與 Drive 中！)*")
+                    st.info("*(準備進入下一階段：將填寫內容寫入資料庫！)*")
 
 elif 'df_questions' in locals() and df_questions.empty:
     st.warning("目前資料庫中沒有題目，請確認 Google Sheet 的「評比題目表」是否已填入資料。")
