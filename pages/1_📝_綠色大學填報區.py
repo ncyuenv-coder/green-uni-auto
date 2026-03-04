@@ -73,7 +73,7 @@ def load_gsheet_data():
         return pd.DataFrame()
 
 # ==========================================
-# 🪄 超級渲染引擎：純正 HTML 表格 + CSS 雙圖並排
+# 🪄 超級渲染引擎：原比例防裁切 + 項目符號還原
 # ==========================================
 def render_native_content(text):
     if not isinstance(text, str) or not text.strip():
@@ -81,136 +81,135 @@ def render_native_content(text):
         return
 
     lines = text.split('\n')
-    in_table = False
-    current_table = []
-    current_row = []
-    current_cell = {"text": "", "images": []}
-    
     ui_blocks = []
-    current_standalone_images = []
+    
+    current_table = None
+    current_row = None
+    current_cell = None
+    standalone_images = []
 
-    # 將累積的照片輸出為兩兩並排的區塊
-    def flush_images():
-        if current_standalone_images:
-            ui_blocks.append({"type": "images", "urls": list(current_standalone_images)})
-            current_standalone_images.clear()
+    def flush_standalone_images():
+        if standalone_images:
+            ui_blocks.append({"type": "images", "urls": list(standalone_images)})
+            standalone_images.clear()
 
-    # --- 1. 資料解析階段 ---
+    # --- 1. 資料解析與結構化 ---
     for line in lines:
         line_str = line.strip()
         if line_str.startswith('>'):
             line_str = line_str[1:].strip()
             
         if "📊" in line_str or "表格資料解析" in line_str:
-            flush_images()
-            in_table = True
-            continue
-            
-        if in_table and line_str == "---":
-            if current_cell["text"].strip() or current_cell["images"]:
-                current_row.append(current_cell)
-            if current_row:
-                current_table.append(current_row)
-            if current_table:
-                ui_blocks.append({"type": "table", "rows": current_table})
-            
-            in_table = False
+            flush_standalone_images()
             current_table = []
-            current_row = []
-            current_cell = {"text": "", "images": []}
+            ui_blocks.append({"type": "table", "rows": current_table})
             continue
             
-        if in_table:
+        if current_table is not None and line_str == "---":
+            current_table = None
+            current_row = None
+            current_cell = None
+            continue
+            
+        if current_table is not None:
             if re.search(r'【第 \d+ 列】', line_str):
-                if current_cell["text"].strip() or current_cell["images"]:
-                    current_row.append(current_cell)
-                if current_row:
-                    current_table.append(current_row)
                 current_row = []
-                current_cell = {"text": "", "images": []}
+                current_table.append(current_row)
+                current_cell = None
                 continue
                 
-            if "[欄位" in line_str or "[Column" in line_str:
-                if current_cell["text"].strip() or current_cell["images"]:
+            col_match = re.search(r'\[?(欄位|Column)\s*\d+\]?[*\s]*[:：]?(.*)', line_str, re.IGNORECASE)
+            if col_match:
+                current_cell = []
+                if current_row is not None:
                     current_row.append(current_cell)
-                parts = re.split(r'[：:]', line_str, maxsplit=1)
-                text_content = parts[1].strip() if len(parts) > 1 else ""
-                text_content = text_content.replace('**', '').replace('*', '').strip()
-                current_cell = {"text": text_content + "\n", "images": []}
+                text_content = col_match.group(2).replace('**', '').strip() # 僅移除加粗標記，保留項目符號
+                if text_content:
+                    current_cell.append({"type": "text", "content": text_content})
                 continue
             
-            img_matches = re.findall(r'!\[.*?\]\((https://drive\.google\.com/[^\)]+)\)', line_str)
-            if img_matches:
-                for img_url in img_matches:
-                    thumb_url = img_url.replace("uc?id=", "thumbnail?sz=w1000&id=")
-                    current_cell["images"].append(thumb_url)
-                clean_line = re.sub(r'!\[.*?\]\(.*?\)', '', line_str).replace('**', '').replace('*', '').strip()
-                if clean_line: current_cell["text"] += clean_line + "\n"
-                continue
-            
-            clean_line = line_str.replace('**', '').replace('*', '').strip()
-            if clean_line: current_cell["text"] += clean_line + "\n"
-                
+            if current_cell is not None:
+                # 使用正則表達式分離圖片與文字，確保順序完全一致
+                parts = re.split(r'(!\[.*?\]\([^\)]+\))', line_str)
+                for part in parts:
+                    part = part.strip()
+                    if not part: continue
+                    if part.startswith('!['):
+                        url_match = re.search(r'\((.*?)\)', part)
+                        if url_match:
+                            thumb_url = url_match.group(1).replace("uc?id=", "thumbnail?sz=w1000&id=")
+                            current_cell.append({"type": "image", "url": thumb_url})
+                    else:
+                        clean_txt = part.replace('**', '').strip()
+                        if clean_txt:
+                            current_cell.append({"type": "text", "content": clean_txt})
+                            
         else:
-            # 非表格區塊：收集獨立照片與文字
-            img_matches = re.findall(r'!\[.*?\]\((https://drive\.google\.com/[^\)]+)\)', line_str)
-            if img_matches:
-                for img_url in img_matches:
-                    thumb_url = img_url.replace("uc?id=", "thumbnail?sz=w1000&id=")
-                    current_standalone_images.append(thumb_url)
-                clean_line = re.sub(r'!\[.*?\]\(.*?\)', '', line_str).replace('**', '').replace('*', '').strip()
-                if clean_line:
-                    flush_images()
-                    ui_blocks.append({"type": "text", "content": clean_line})
-            else:
-                clean_line = line_str.replace('**', '').replace('*', '').strip()
-                if clean_line:
-                    flush_images()
-                    ui_blocks.append({"type": "text", "content": clean_line})
+            # 非表格區塊
+            parts = re.split(r'(!\[.*?\]\([^\)]+\))', line_str)
+            for part in parts:
+                part = part.strip()
+                if not part: continue
+                if part.startswith('!['):
+                    url_match = re.search(r'\((.*?)\)', part)
+                    if url_match:
+                        thumb_url = url_match.group(1).replace("uc?id=", "thumbnail?sz=w1000&id=")
+                        standalone_images.append(thumb_url)
+                else:
+                    clean_txt = part.replace('**', '').strip()
+                    if clean_txt:
+                        flush_standalone_images()
+                        ui_blocks.append({"type": "text", "content": clean_txt})
 
-    flush_images()
-    if in_table:
-        if current_cell["text"].strip() or current_cell["images"]: current_row.append(current_cell)
-        if current_row: current_table.append(current_row)
-        if current_table: ui_blocks.append({"type": "table", "rows": current_table})
+    flush_standalone_images()
 
-    # --- 2. HTML 畫布繪製階段 ---
+    # --- 2. HTML 畫布繪製 ---
     html_str = ""
     for block in ui_blocks:
         if block["type"] == "text":
-            text_content = block["content"].replace('\n', '<br>')
-            html_str += f'<p style="line-height: 1.6; color: #2C3E50; font-size: 1.05em; margin-bottom: 12px;">{text_content}</p>'
+            txt = block["content"].replace('\n', '<br>')
+            # 🌟 項目符號完美還原機制
+            if txt.startswith('* ') or txt.startswith('- '):
+                txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>• {txt[2:]}</div>"
+            elif re.match(r'^\d+\.\s', txt):
+                txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>{txt}</div>"
+            else:
+                txt = f"<div style='margin-bottom: 8px;'>{txt}</div>"
+            html_str += f'<div style="line-height: 1.6; color: #2C3E50; font-size: 1.05em;">{txt}</div>'
             
         elif block["type"] == "images":
-            # 🌟 魔法 1：CSS Grid 強制 2 張並排，高度統一 280px，多餘部分自動漂亮裁切
-            html_str += '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">'
+            # 🌟 非表格圖片：CSS Grid 強制 2 張並排，高度 auto 絕不裁切！
+            html_str += '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px; align-items: start;">'
             for url in block["urls"]:
-                html_str += f'<img src="{url}" referrerpolicy="no-referrer" style="width: 100%; height: 280px; object-fit: cover; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">'
+                html_str += f'<img src="{url}" referrerpolicy="no-referrer" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">'
             html_str += '</div>'
             
         elif block["type"] == "table":
-            # 🌟 魔法 2：純正的 HTML Table，保證格子整齊對齊
-            html_str += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; border: 2px solid #8F9CA3; border-radius: 4px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">'
+            # 🌟 表格：table-layout: fixed 強制鎖定欄寬，文字絕對不變形！
+            html_str += '<table style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 25px; border: 2px solid #8F9CA3; border-radius: 4px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">'
             for r_idx, row in enumerate(block["rows"]):
                 html_str += '<tr style="border-bottom: 1px solid #D9E0E3;">'
                 col_width = f"{100/len(row)}%" if row else "100%"
-                for c_idx, cell in enumerate(row):
-                    # 表格第一列(通常是標題)給予微微的莫蘭迪灰底色
+                for c_idx, cell_contents in enumerate(row):
                     bg_color = "#F4F6F7" if r_idx == 0 else "#FFFFFF"
-                    html_str += f'<td style="border: 1px solid #D9E0E3; padding: 15px; vertical-align: top; width: {col_width}; background-color: {bg_color};">'
+                    html_str += f'<td style="border: 1px solid #D9E0E3; padding: 15px; vertical-align: top; width: {col_width}; background-color: {bg_color}; word-wrap: break-word;">'
                     
-                    if cell["text"].strip():
-                        cell_txt = cell["text"].strip().replace('\n', '<br>')
-                        html_str += f'<div style="margin-bottom: 12px; color: #34495E; font-size: 0.95em; line-height: 1.5;">{cell_txt}</div>'
+                    # 依序精準輸出該欄位內的所有圖片與文字
+                    for item in cell_contents:
+                        if item["type"] == "text":
+                            txt = item["content"]
+                            if txt.startswith('* ') or txt.startswith('- '):
+                                txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>• {txt[2:]}</div>"
+                            elif re.match(r'^\d+\.\s', txt):
+                                txt = f"<div style='margin-left: 1.5em; text-indent: -1.5em;'>{txt}</div>"
+                            else:
+                                txt = f"<div style='margin-bottom: 6px;'>{txt}</div>"
+                            html_str += f'<div style="color: #34495E; font-size: 0.95em; line-height: 1.5;">{txt}</div>'
                         
-                    if cell["images"]:
-                        # 如果儲存格內有多張照片，也套用 2 張並排邏輯
-                        grid_style = "display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;" if len(cell["images"]) > 1 else "display: block;"
-                        html_str += f'<div style="{grid_style}">'
-                        for url in cell["images"]:
-                            html_str += f'<img src="{url}" referrerpolicy="no-referrer" style="width: 100%; max-height: 200px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">'
-                        html_str += '</div>'
-                        
+                        elif item["type"] == "image":
+                            # 🌟 表格內圖片：100% 寬度，高度 auto 原比例縮放，絕不裁切！
+                            html_str += f'<img src="{item["url"]}" referrerpolicy="no-referrer" style="width: 100%; height: auto; display: block; margin: 10px 0; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">'
+                            
                     html_str += '</td>'
                 html_str += '</tr>'
             html_str += '</table>'
