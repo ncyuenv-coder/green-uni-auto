@@ -73,109 +73,120 @@ def load_gsheet_data():
         return pd.DataFrame()
 
 # ==========================================
-# 🪄 終極超級渲染引擎：純正 HTML 建構與完美解析
+# 🪄 AI 智慧渲染引擎：自動分辨「照片版面」與「資料表格」
 # ==========================================
 def render_native_content(text):
     if not isinstance(text, str) or not text.strip():
         st.info("*(🚧 系統提示：尚無去年度文字資料，待後台擷取後自動匯入。)*")
         return
 
+    # 將 API 轉換為縮圖高畫質版本
+    text = text.replace("https://drive.google.com/uc?id=", "https://drive.google.com/thumbnail?sz=w1000&id=")
     lines = text.split('\n')
-    html = []
-    in_table = False
-    current_cell_html = []
     
-    def process_line(line_str):
-        line_str = line_str.strip()
-        if not line_str: return ""
+    html_output = []
+    in_table = False
+    table_rows = []
+    current_row = []
+    current_cell = None  # 使用 None 來區分「還沒開始讀格子」跟「格子是空的」
+
+    # 單行文字處理器 (處理圖片、粗體、清單項目)
+    def process_line(l):
+        l = l.strip()
+        if not l: return ""
         
-        # 1. 處理項目符號 (完美還原 Word 縮排)
-        is_bullet = False
-        if line_str.startswith('* ') or line_str.startswith('- '):
-            line_str = f"<div style='margin-left: 1.5em; text-indent: -1.5em; margin-bottom: 5px;'>• {line_str[2:]}</div>"
-            is_bullet = True
-        elif re.match(r'^\d+\.\s', line_str):
-            line_str = f"<div style='margin-left: 1.5em; text-indent: -1.5em; margin-bottom: 5px;'>{line_str}</div>"
-            is_bullet = True
-            
-        # 2. 處理圖片 (保證 2 張並排、不裁切)
-        def img_repl(match):
-            url = match.group(1).replace("uc?id=", "thumbnail?sz=w1000&id=")
-            # 🌟 魔法核心：width 設定 48%，保證兩兩並排；height: auto 保證不裁切！
-            return f'<img src="{url}" referrerpolicy="no-referrer" style="width: calc(50% - 10px); min-width: 150px; height: auto; margin: 5px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.15); display: inline-block; vertical-align: top;">'
-            
-        original_line = line_str
-        line_str = re.sub(r'!\[.*?\]\((.*?)\)', img_repl, line_str)
-        line_str = line_str.replace('**', '') # 移除 Markdown 粗體星號
+        # 1. 處理圖片：轉換為 100% 寬度、自動高度的 HTML 標籤
+        def img_repl(m):
+            url = m.group(1)
+            return f'<img src="{url}" referrerpolicy="no-referrer" style="width: 100%; height: auto; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 8px;">'
+        l = re.sub(r'!\[.*?\]\((.*?)\)', img_repl, l)
         
-        # 3. 如果這行是純文字，包裝成 div 確保段落換行
-        if not is_bullet and '<img' not in line_str:
-            line_str = f"<div style='margin-bottom: 8px; line-height: 1.6;'>{line_str}</div>"
-            
-        return line_str
+        # 2. 處理粗體 (保留字體加粗，移除星號)
+        l = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', l)
+        
+        # 3. 處理項目符號與序號 (完美還原 Word 縮排)
+        if re.match(r'^(\*|-)\s+', l):
+            l = f"<div style='margin-left: 1.5em; text-indent: -1.2em; margin-bottom: 5px;'>• {l[2:]}</div>"
+        elif re.match(r'^(\d+\.)\s+', l):
+            match = re.match(r'^(\d+\.)\s+(.*)', l)
+            l = f"<div style='margin-left: 1.5em; text-indent: -1.5em; margin-bottom: 5px;'>{match.group(1)} {match.group(2)}</div>"
+        else:
+            if not l.startswith('<img'):
+                l = f"<div style='margin-bottom: 6px;'>{l}</div>"
+        return l
 
     for line in lines:
-        line = line.strip()
-        if line.startswith('>'):
-            line = line[1:].strip()
+        raw_line = line.strip()
+        if raw_line.startswith('>'):
+            raw_line = raw_line[1:].strip()
             
-        # 偵測表格開頭
-        if "📊" in line or "表格資料解析" in line:
-            if in_table:
-                if current_cell_html: html.append("".join(current_cell_html) + "</td>")
-                html.append("</tr></table>")
+        # 偵測到表格開始
+        if "📊" in raw_line or "表格資料解析" in raw_line:
             in_table = True
-            current_cell_html = []
-            # 建立表格外框
-            html.append('<table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; border: 2px solid #8F9CA3; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font-size: 1.05em;">')
+            table_rows = []
+            current_row = []
+            current_cell = None
             continue
             
-        # 偵測表格結尾
-        if in_table and line == "---":
-            if current_cell_html: html.append("".join(current_cell_html) + "</td>")
-            html.append("</tr></table>")
+        # 偵測到表格結束
+        if in_table and raw_line == "---":
             in_table = False
-            current_cell_html = []
+            if current_cell is not None: current_row.append(current_cell)
+            if current_row: table_rows.append(current_row)
+            
+            # 🌟 核心魔法：判斷這是哪種表格，並決定怎麼畫它！
+            if table_rows:
+                # 掃描表格內有沒有圖片標籤
+                has_img = any('<img' in c for r in table_rows for c in r)
+                
+                if has_img:
+                    # 📸 這是「照片排版表」：拔掉框線，拿掉底色，文字置中！
+                    tbl = '<table style="width: 100%; border: none; table-layout: fixed; margin-bottom: 25px;">'
+                    for r in table_rows:
+                        tbl += '<tr>'
+                        for c in r:
+                            tbl += f'<td style="border: none; padding: 10px; vertical-align: top; text-align: left;">{c}</td>'
+                        tbl += '</tr>'
+                    tbl += '</table>'
+                else:
+                    # 📊 這是「真實資料表」：畫出漂亮的灰色框線與標題底色！
+                    tbl = '<table style="width: 100%; border-collapse: collapse; border: 1px solid #D9E0E3; margin-bottom: 25px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">'
+                    for i, r in enumerate(table_rows):
+                        tbl += '<tr>'
+                        bg = "#F8FAFB" if i == 0 else "#FFFFFF"
+                        for c in r:
+                            tbl += f'<td style="border: 1px solid #D9E0E3; padding: 12px; vertical-align: top; background-color: {bg}; font-size: 0.95em; color: #34495E;">{c}</td>'
+                        tbl += '</tr>'
+                    tbl += '</table>'
+                html_output.append(tbl)
             continue
             
         if in_table:
-            # 偵測換列
-            if re.search(r'【第 \d+ 列】', line):
-                if current_cell_html: 
-                    html.append("".join(current_cell_html) + "</td>")
-                    current_cell_html = []
-                if html and html[-1].endswith("</td>"):
-                    html.append("</tr>")
-                html.append('<tr style="border-bottom: 1px solid #D9E0E3;">')
+            # 換列訊號
+            if re.search(r'【第 \d+ 列】', raw_line):
+                if current_cell is not None: current_row.append(current_cell)
+                if current_row: table_rows.append(current_row)
+                current_row = []
+                current_cell = None
                 continue
                 
-            # 偵測換格 (欄位)
-            if "[欄位" in line or "[Column" in line:
-                if current_cell_html: 
-                    html.append("".join(current_cell_html) + "</td>")
-                    current_cell_html = []
-                # 建立儲存格
-                html.append("<td style='border: 1px solid #D9E0E3; padding: 15px; vertical-align: top; background-color: #FFFFFF; color: #2C3E50;'>")
-                
-                # 擷取欄位標籤後的文字
-                text_part = re.sub(r'\[?(欄位|Column)\s*\d+\]?[*\s]*[:：]?', '', line).strip()
-                if text_part:
-                    current_cell_html.append(process_line(text_part))
+            # 換格訊號
+            col_match = re.search(r'\[?(欄位|Column)\s*\d+\]?[*\s]*[:：]?(.*)', raw_line, re.IGNORECASE)
+            if col_match:
+                if current_cell is not None: current_row.append(current_cell)
+                current_cell = process_line(col_match.group(2))
                 continue
             
-            # 表格內的正常內容
-            if line:
-                current_cell_html.append(process_line(line))
+            # 填入格子內容
+            if current_cell is not None and raw_line:
+                current_cell += process_line(raw_line)
         else:
-            # 非表格區塊的內容
-            if line:
-                html.append(f"<div style='color: #2C3E50; font-size: 1.05em;'>{process_line(line)}</div>")
-                
-    if in_table:
-        if current_cell_html: html.append("".join(current_cell_html) + "</td>")
-        html.append("</tr></table>")
-        
-    st.markdown("".join(html), unsafe_allow_html=True)
+            # 一般文字 (非表格)
+            if raw_line:
+                html_output.append(f"<div style='line-height: 1.6; color: #2C3E50; font-size: 1.05em;'>{process_line(raw_line)}</div>")
+
+    # 把最後的結果印在畫面上
+    st.markdown("".join(html_output), unsafe_allow_html=True)
 
 
 # ==========================================
