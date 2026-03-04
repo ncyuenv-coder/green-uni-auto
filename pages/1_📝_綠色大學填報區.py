@@ -47,7 +47,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🔌 資料庫連線與快取控制 (🌟 新增快取清除機制)
+# 🔌 資料庫連線與快取控制
 # ==========================================
 @st.cache_data(ttl=600)
 def load_gsheet_data():
@@ -73,7 +73,7 @@ def load_gsheet_data():
         return pd.DataFrame()
 
 # ==========================================
-# 🪄 超級渲染引擎：將純文字轉換為 Streamlit 原生排版
+# 🪄 超級渲染引擎：純正 HTML 表格 + CSS 雙圖並排
 # ==========================================
 def render_native_content(text):
     if not isinstance(text, str) or not text.strip():
@@ -86,19 +86,26 @@ def render_native_content(text):
     current_row = []
     current_cell = {"text": "", "images": []}
     
-    ui_blocks = [] # 儲存解析後的區塊
-    
+    ui_blocks = []
+    current_standalone_images = []
+
+    # 將累積的照片輸出為兩兩並排的區塊
+    def flush_images():
+        if current_standalone_images:
+            ui_blocks.append({"type": "images", "urls": list(current_standalone_images)})
+            current_standalone_images.clear()
+
+    # --- 1. 資料解析階段 ---
     for line in lines:
         line_str = line.strip()
         if line_str.startswith('>'):
             line_str = line_str[1:].strip()
             
-        # 隱藏並標記表格開始
         if "📊" in line_str or "表格資料解析" in line_str:
+            flush_images()
             in_table = True
             continue
             
-        # 表格結束
         if in_table and line_str == "---":
             if current_cell["text"].strip() or current_cell["images"]:
                 current_row.append(current_cell)
@@ -114,95 +121,101 @@ def render_native_content(text):
             continue
             
         if in_table:
-            # 隱藏【第 X 列】並作為換列觸發器
             if re.search(r'【第 \d+ 列】', line_str):
                 if current_cell["text"].strip() or current_cell["images"]:
                     current_row.append(current_cell)
                 if current_row:
                     current_table.append(current_row)
-                    
                 current_row = []
                 current_cell = {"text": "", "images": []}
                 continue
                 
-            # 隱藏 [欄位 X] 並擷取內容
             if "[欄位" in line_str or "[Column" in line_str:
                 if current_cell["text"].strip() or current_cell["images"]:
                     current_row.append(current_cell)
-                    
                 parts = re.split(r'[：:]', line_str, maxsplit=1)
                 text_content = parts[1].strip() if len(parts) > 1 else ""
                 text_content = text_content.replace('**', '').replace('*', '').strip()
-                
                 current_cell = {"text": text_content + "\n", "images": []}
                 continue
             
-            # 擷取圖片網址並轉換為防盜鏈縮圖 API
             img_matches = re.findall(r'!\[.*?\]\((https://drive\.google\.com/[^\)]+)\)', line_str)
             if img_matches:
                 for img_url in img_matches:
                     thumb_url = img_url.replace("uc?id=", "thumbnail?sz=w1000&id=")
                     current_cell["images"].append(thumb_url)
-                
-                # 移除 Markdown 圖片語法，只保留純文字
                 clean_line = re.sub(r'!\[.*?\]\(.*?\)', '', line_str).replace('**', '').replace('*', '').strip()
-                if clean_line:
-                    current_cell["text"] += clean_line + "\n"
+                if clean_line: current_cell["text"] += clean_line + "\n"
                 continue
             
             clean_line = line_str.replace('**', '').replace('*', '').strip()
-            if clean_line:
-                current_cell["text"] += clean_line + "\n"
+            if clean_line: current_cell["text"] += clean_line + "\n"
                 
         else:
-            # 處理非表格的一般文字與圖片
+            # 非表格區塊：收集獨立照片與文字
             img_matches = re.findall(r'!\[.*?\]\((https://drive\.google\.com/[^\)]+)\)', line_str)
             if img_matches:
                 for img_url in img_matches:
                     thumb_url = img_url.replace("uc?id=", "thumbnail?sz=w1000&id=")
-                    ui_blocks.append({"type": "image", "url": thumb_url})
-                
+                    current_standalone_images.append(thumb_url)
                 clean_line = re.sub(r'!\[.*?\]\(.*?\)', '', line_str).replace('**', '').replace('*', '').strip()
                 if clean_line:
+                    flush_images()
                     ui_blocks.append({"type": "text", "content": clean_line})
             else:
                 clean_line = line_str.replace('**', '').replace('*', '').strip()
                 if clean_line:
+                    flush_images()
                     ui_blocks.append({"type": "text", "content": clean_line})
 
-    # 補足最後一筆資料
+    flush_images()
     if in_table:
-        if current_cell["text"].strip() or current_cell["images"]:
-            current_row.append(current_cell)
-        if current_row:
-            current_table.append(current_row)
-        if current_table:
-            ui_blocks.append({"type": "table", "rows": current_table})
+        if current_cell["text"].strip() or current_cell["images"]: current_row.append(current_cell)
+        if current_row: current_table.append(current_row)
+        if current_table: ui_blocks.append({"type": "table", "rows": current_table})
 
-    # 🚀 真正繪製到 Streamlit 網頁上
+    # --- 2. HTML 畫布繪製階段 ---
+    html_str = ""
     for block in ui_blocks:
         if block["type"] == "text":
-            st.markdown(block["content"])
-        elif block["type"] == "image":
-            # 非表格內的獨立圖片，限制寬度避免過大
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.image(block["url"], use_container_width=True)
+            text_content = block["content"].replace('\n', '<br>')
+            html_str += f'<p style="line-height: 1.6; color: #2C3E50; font-size: 1.05em; margin-bottom: 12px;">{text_content}</p>'
+            
+        elif block["type"] == "images":
+            # 🌟 魔法 1：CSS Grid 強制 2 張並排，高度統一 280px，多餘部分自動漂亮裁切
+            html_str += '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">'
+            for url in block["urls"]:
+                html_str += f'<img src="{url}" referrerpolicy="no-referrer" style="width: 100%; height: 280px; object-fit: cover; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">'
+            html_str += '</div>'
+            
         elif block["type"] == "table":
-            for row in block["rows"]:
-                if not row: continue
-                # 自動依據欄位數量切分等寬欄位
-                cols = st.columns(len(row))
-                for idx, cell in enumerate(row):
-                    with cols[idx]:
-                        # 🌟 使用 Streamlit 內建帶邊框的容器，完美模擬表格儲存格！
-                        with st.container(border=True):
-                            # 照片在上方
-                            for img_url in cell["images"]:
-                                st.image(img_url, use_container_width=True)
-                            # 翻譯文字在下方
-                            if cell["text"].strip():
-                                st.markdown(cell["text"].strip())
+            # 🌟 魔法 2：純正的 HTML Table，保證格子整齊對齊
+            html_str += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; border: 2px solid #8F9CA3; border-radius: 4px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">'
+            for r_idx, row in enumerate(block["rows"]):
+                html_str += '<tr style="border-bottom: 1px solid #D9E0E3;">'
+                col_width = f"{100/len(row)}%" if row else "100%"
+                for c_idx, cell in enumerate(row):
+                    # 表格第一列(通常是標題)給予微微的莫蘭迪灰底色
+                    bg_color = "#F4F6F7" if r_idx == 0 else "#FFFFFF"
+                    html_str += f'<td style="border: 1px solid #D9E0E3; padding: 15px; vertical-align: top; width: {col_width}; background-color: {bg_color};">'
+                    
+                    if cell["text"].strip():
+                        cell_txt = cell["text"].strip().replace('\n', '<br>')
+                        html_str += f'<div style="margin-bottom: 12px; color: #34495E; font-size: 0.95em; line-height: 1.5;">{cell_txt}</div>'
+                        
+                    if cell["images"]:
+                        # 如果儲存格內有多張照片，也套用 2 張並排邏輯
+                        grid_style = "display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;" if len(cell["images"]) > 1 else "display: block;"
+                        html_str += f'<div style="{grid_style}">'
+                        for url in cell["images"]:
+                            html_str += f'<img src="{url}" referrerpolicy="no-referrer" style="width: 100%; max-height: 200px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">'
+                        html_str += '</div>'
+                        
+                    html_str += '</td>'
+                html_str += '</tr>'
+            html_str += '</table>'
+
+    st.markdown(html_str, unsafe_allow_html=True)
 
 
 # ==========================================
@@ -212,7 +225,7 @@ col_title, col_btn = st.columns([3, 1])
 with col_title:
     st.title("📝 嘉大綠色大學填報區")
 with col_btn:
-    st.write("") # 排版佔位
+    st.write("") 
     if st.button("🔄 同步最新雲端資料", use_container_width=True):
         load_gsheet_data.clear()
         st.rerun()
@@ -243,23 +256,15 @@ if not df_questions.empty:
         st.markdown(f"<div style='color: black; font-size: 1.1em; padding-left: 5px; margin-bottom: 15px;'><b>中文說明：</b><br>{question_data.get('中文說明', '無')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='morandi-req'><b>🔍 資料需求：</b><br>{question_data.get('資料需求', '無特別說明')}</div>", unsafe_allow_html=True)
         
-        # ==========================================
-        # ✨ 終極版：原生元件渲染區塊
-        # ==========================================
         with st.expander("💡 點擊展開查看：前一年度 (2025) 參考資訊", expanded=True):
             st.markdown(f"**對應之去年度題目：** {question_data.get('前一年度題目', '無')}")
             st.markdown("---")
             
             ref_text = question_data.get('2025參考文字_AI預留', '')
-            
-            # 將後台整理好的文字，餵給原生渲染引擎
             render_native_content(ref_text)
                 
         st.markdown("---")
         
-        # ==========================================
-        # 🎯 年度成果填報與資料上傳
-        # ==========================================
         with st.form("report_form"):
             report_text = st.text_area("✍️ 填報資訊/年度執行亮點成果", height=150, placeholder="請在此輸入您的填寫內容...")
             uploaded_files = st.file_uploader("📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等)：", accept_multiple_files=True)
