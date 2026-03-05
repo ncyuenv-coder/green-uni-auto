@@ -32,7 +32,7 @@ st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", l
 # ==========================================
 st.markdown("""
 <style>
-    /* 1. 標籤頁 (Tabs) 樣式：淺藍色底色、字體放大2號字 */
+    /* 1. 標籤頁 (Tabs) 樣式：未選取為淺藍，選取為深藍底白字 */
     button[data-baseweb="tab"] {
         background-color: #E6F0F9 !important;
         border-radius: 8px 8px 0px 0px !important;
@@ -40,9 +40,10 @@ st.markdown("""
         padding: 10px 20px !important;
         border: 1px solid #AED6F1 !important;
         border-bottom: none !important;
+        transition: all 0.3s ease;
     }
-    button[data-baseweb="tab"] * {
-        font-size: 1.3em !important; 
+    button[data-baseweb="tab"] p {
+        font-size: 1.4em !important; 
         font-weight: bold !important;
         color: #2C3E50 !important;
     }
@@ -52,7 +53,7 @@ st.markdown("""
         border: 1px solid #0B2331 !important;
         border-bottom: 3px solid #0B2331 !important;
     }
-    button[data-baseweb="tab"][aria-selected="true"] * {
+    button[data-baseweb="tab"][aria-selected="true"] p {
         color: #FFFFFF !important;
     }
 
@@ -478,7 +479,7 @@ with tab_view:
                 
                 st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
                 
-                # 🌟 透過升級版的智慧解析引擎，將填報內容自動排版與完美縮排
+                # 🌟 修復換行並自動縮排的完美引擎
                 formatted_report = format_report_text_to_html(latest_record.get('填報內容', '無'))
                 st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
                 
@@ -496,10 +497,10 @@ with tab_view:
                     for idx, f in enumerate(file_records):
                         with cols[idx % 2]:
                             st.markdown(f"**📌 {f['desc']}**")
-                            # 🌟 採用 Base64 絕對不破圖方案！
+                            # 🌟 強制使用 Base64 下載，並套用 7.5/5.5 的長寬比與自動最適化
                             b64_img = get_drive_image_b64(f['id'])
                             if b64_img:
-                                img_html = f'<div style="text-align: center;"><img src="data:image/jpeg;base64,{b64_img}" style="height: 8cm; width: 100%; object-fit: contain; background-color: #f1f1f1; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccc;"></div>'
+                                img_html = f'<div style="text-align: center;"><img src="data:image/jpeg;base64,{b64_img}" style="aspect-ratio: 7.5 / 5.5; width: 100%; height: auto; object-fit: contain; background-color: #f1f1f1; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccc;"></div>'
                                 st.markdown(img_html, unsafe_allow_html=True)
                             else:
                                 st.warning("⚠️ 圖片無法預覽，請確認檔案是否為圖片格式。")
