@@ -5,11 +5,6 @@ from google.oauth2.credentials import Credentials
 import re
 
 # ==========================================
-# 🌟 已經自動為您綁定好的 PDF 檔案 ID
-# ==========================================
-PDF_FILE_ID = "1hXs3yUwNxEiNZkJNeAfDTZjs9jxEgJos"
-
-# ==========================================
 # 🛡️ 資安防護罩
 # ==========================================
 if st.session_state.get("authentication_status") is not True:
@@ -33,7 +28,6 @@ st.markdown("""
         margin-bottom: 5px;
         margin-top: 15px;
     }
-    /* 🌟 新增：放大版的資料需求區塊 */
     .morandi-req-large {
         background-color: #E2E7E3;
         color: #2C3E50;
@@ -43,9 +37,8 @@ st.markdown("""
         margin-top: 25px;
         margin-bottom: 15px;
         line-height: 1.6;
-        font-size: 1.25em; /* 字體放大 */
+        font-size: 1.25em;
     }
-    /* 🌟 新增：填報區專用的莫蘭迪大標題 */
     .morandi-form-header {
         background-color: #8F9CA3;
         color: white;
@@ -144,7 +137,7 @@ if not df_questions.empty:
         st.markdown(f"<div style='color: black; font-size: 1.1em; padding-left: 5px; margin-bottom: 15px;'><b>中文說明：</b><br>{question_data.get('中文說明', '無')}</div>", unsafe_allow_html=True)
         
         # ==========================================
-        # ✨ 雙軌對照法：左邊 PDF 原檔，右邊純文字翻譯
+        # ✨ 單題對照法：左側精準顯示該題專屬 PDF
         # ==========================================
         with st.expander("💡 點擊展開查看：前一年度 (2025) 參考資訊", expanded=True):
             st.markdown(f"**對應之去年度題目：** {question_data.get('前一年度題目', '無')}")
@@ -153,10 +146,15 @@ if not df_questions.empty:
             col_pdf, col_trans = st.columns([1, 1])
             
             with col_pdf:
-                st.markdown("#### 📄 原始排版 (2024年原檔)")
-                pdf_url = f"https://drive.google.com/file/d/{PDF_FILE_ID}/preview"
-                st.markdown(f'<iframe src="{pdf_url}" width="100%" height="600" style="border: 2px solid #8F9CA3; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></iframe>', unsafe_allow_html=True)
-                st.caption("🔍 小提示：您可以在文件內滑動，或使用上方工具列放大/縮小尋找對應題號。")
+                st.markdown("#### 📄 原始排版 (2024年單題原檔)")
+                
+                # 動態讀取該題的專屬 PDF ID
+                pdf_id = str(question_data.get('單題PDF_ID', '')).strip()
+                if pdf_id and pdf_id.lower() != 'nan':
+                    pdf_url = f"https://drive.google.com/file/d/{pdf_id}/preview"
+                    st.markdown(f'<iframe src="{pdf_url}" width="100%" height="600" style="border: 2px solid #8F9CA3; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></iframe>', unsafe_allow_html=True)
+                else:
+                    st.info("*(🚧 系統提示：尚無本題專屬的 PDF 原檔可供預覽。)*")
             
             with col_trans:
                 st.markdown("#### 🇹🇼 中文翻譯參考")
@@ -167,14 +165,12 @@ if not df_questions.empty:
                     st.info("*(🚧 系統提示：本題尚無去年度文字資料，或原檔中未提供。)*")
         
         # ==========================================
-        # 🎯 填報區塊 (已升級：移入資料需求 + 莫蘭迪顯眼標題)
+        # 🎯 填報區塊
         # ==========================================
-        # 移下來並放大的「資料需求」
         st.markdown(f"<div class='morandi-req-large'><b>🔍 資料需求：</b><br>{question_data.get('資料需求', '無特別說明')}</div>", unsafe_allow_html=True)
         
         with st.form("report_form"):
             st.markdown("<div class='morandi-form-header'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
-            # 使用 label_visibility="collapsed" 把原本灰灰小小標題藏起來
             report_text = st.text_area("填報資訊", height=200, placeholder="請在此輸入您的填寫內容...", label_visibility="collapsed")
             
             st.markdown("<div class='morandi-form-header'>📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等)</div>", unsafe_allow_html=True)
