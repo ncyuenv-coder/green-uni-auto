@@ -3,6 +3,7 @@ import pandas as pd
 import gspread
 import io
 import re
+import datetime
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -23,95 +24,67 @@ if st.session_state.get("authentication_status") is not True:
 st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", layout="wide")
 
 # ==========================================
-# 🎨 系統 UI 樣式設定 (全面升級莫蘭迪色系與字體)
+# 🎨 系統 UI 樣式設定 (包含您指定的莫蘭迪色與字體優化)
 # ==========================================
 st.markdown("""
 <style>
-    /* 1. 選單小標題：莫蘭迪綠 (放大一號) */
     .morandi-select-title {
-        background-color: #9DAB86;
-        color: white;
-        padding: 12px 15px;
-        border-radius: 6px;
-        font-weight: bold;
-        font-size: 1.2em; /* 放大一號 */
-        margin-bottom: 5px;
-        margin-top: 15px;
+        background-color: #9DAB86; color: white; padding: 12px 15px; border-radius: 6px;
+        font-weight: bold; font-size: 1.2em; margin-bottom: 5px; margin-top: 15px;
     }
     
-    /* 2. 題目標題：莫蘭迪紫灰 (放大兩號) */
     .morandi-question-title {
-        background-color: #948B89;
-        color: white;
-        padding: 15px 18px;
-        border-radius: 6px;
-        font-weight: bold;
-        font-size: 1.4em; /* 放大兩號 */
-        margin-bottom: 15px;
-        margin-top: 10px;
+        background-color: #948B89; color: white; padding: 15px 18px; border-radius: 6px;
+        font-weight: bold; font-size: 1.4em; margin-bottom: 15px; margin-top: 10px;
     }
 
-    /* 7. 資料填報區：莫蘭迪橘 (置中大字) */
     .morandi-orange-title {
-        background-color: #D4A373;
-        color: white;
-        padding: 15px 20px;
-        border-radius: 6px;
-        font-weight: bold;
-        font-size: 1.6em; /* 大字顯示 */
-        margin-bottom: 15px;
-        margin-top: 30px;
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        background-color: #D4A373; color: white; padding: 15px 20px; border-radius: 6px;
+        font-weight: bold; font-size: 1.6em; margin-bottom: 15px; margin-top: 30px;
+        text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
 
-    /* 7(1) 提供資料及佐證說明：淺藍色底色 */
     .light-blue-box {
-        background-color: #E6F0F9;
-        color: #2C3E50;
-        padding: 20px;
-        border-left: 6px solid #8FAAB8;
-        border-radius: 6px;
-        margin-bottom: 15px;
-        font-size: 1.05em;
-        line-height: 1.8;
+        background-color: #E6F0F9; color: #2C3E50; padding: 20px; border-left: 6px solid #8FAAB8;
+        border-radius: 6px; margin-bottom: 15px; font-size: 1.05em; line-height: 1.8;
     }
 
-    /* 7(2)(3)(4) 淺黃色底色區塊 */
+    /* 將底色區塊與下方元件貼緊，避免跑版的優化寫法 */
     .light-yellow-box {
-        background-color: #FDF6E3;
-        color: #2C3E50;
-        padding: 20px;
-        border-left: 6px solid #E6C27A;
-        border-radius: 6px;
-        margin-bottom: 15px;
-        line-height: 1.8;
+        background-color: #FDF6E3; color: #2C3E50; padding: 15px 20px; border-left: 6px solid #E6C27A;
+        border-radius: 6px; margin-bottom: 5px; line-height: 1.6;
     }
 
-    /* 4. 點擊展開查看：放大一號字 */
-    div[data-testid="stExpander"] details summary p {
-        font-size: 1.2em !important;
-        font-weight: bold;
-        color: #2C3E50;
+    /* 2(2) 點擊展開查看：改為黑底白字，展開後不同色調 */
+    [data-testid="stExpander"] details summary {
+        background-color: #2C3E50 !important; color: white !important; border-radius: 6px;
+    }
+    [data-testid="stExpander"] details summary p {
+        color: white !important; font-size: 1.2em !important; font-weight: bold;
+    }
+    [data-testid="stExpander"] details summary svg { fill: white !important; }
+    [data-testid="stExpander"] details[open] > div:nth-child(2) {
+        background-color: #F4F6F7 !important; border: 2px solid #2C3E50; border-top: none;
+        border-radius: 0 0 6px 6px; padding: 15px;
     }
     
-    /* 8. 送出按鈕：放大兩號字 */
+    /* 6(3) 增減筆數按鈕改為淺藍色底色、深藍色字體 */
+    div.stButton > button[kind="secondary"] {
+        background-color: #D6EAF8 !important; color: #154360 !important; 
+        border: 1px solid #AED6F1 !important; border-radius: 6px !important; font-weight: bold !important;
+    }
+    
+    /* 8. 送出按鈕放大兩號 */
     div.stButton > button[kind="primary"] {
-        border-radius: 8px !important;
-        font-weight: bold !important;
-        font-size: 1.4em !important; /* 放大兩號字 */
-        padding: 12px 30px !important;
+        border-radius: 8px !important; font-weight: bold !important; font-size: 1.4em !important; padding: 12px 30px !important;
     }
     
-    /* 下拉選單內部文字放大 */
-    div[data-baseweb="select"] {
-        font-size: 1.1em !important;
-    }
+    /* 6(5) 隱藏 Limit 200MB 提示 */
+    [data-testid="stFileUploadDropzone"] small { display: none !important; }
 
     .custom-scrollbar::-webkit-scrollbar { width: 8px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #8F9CA3; border-radius: 4px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #738087; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -121,11 +94,9 @@ st.markdown("""
 def get_gcp_credentials():
     skey = st.secrets["gcp_oauth"].to_dict()
     return Credentials(
-        token=None,
-        refresh_token=skey.get("refresh_token"),
+        token=None, refresh_token=skey.get("refresh_token"),
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=skey.get("client_id"),
-        client_secret=skey.get("client_secret")
+        client_id=skey.get("client_id"), client_secret=skey.get("client_secret")
     )
 
 @st.cache_data(ttl=600)
@@ -143,7 +114,6 @@ def load_gsheet_data():
         st.error(f"⚠️ 無法讀取 Google Sheet，詳細錯誤：{e}")
         return pd.DataFrame()
 
-# 上傳檔案至 Google Drive 的功能
 def upload_file_to_drive(file_obj, filename, folder_id):
     try:
         creds = get_gcp_credentials()
@@ -156,7 +126,28 @@ def upload_file_to_drive(file_obj, filename, folder_id):
         st.error(f"上傳失敗 ({filename}): {e}")
         return None
 
-# 初始化動態上傳區塊的數量 (預設 5 個)
+def write_to_database(unit, q_id, q_title, report_text, file_records):
+    try:
+        creds = get_gcp_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8')
+        ws = sh.worksheet("填報資料庫")
+        
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row = [now_str, unit, q_id, q_title, report_text]
+        
+        # 依序寫入檔案說明與ID，最多支援填滿 5 個檔案(10格)
+        for record in file_records:
+            row.extend([record['desc'], record['id']])
+            
+        # 不足的欄位補空值，確保寫入格式整齊 (共15欄)
+        row += [''] * (15 - len(row))
+        ws.append_row(row[:15])
+        return True
+    except Exception as e:
+        st.error(f"⚠️ 寫入資料庫失敗：{e}")
+        return False
+
 if "upload_count" not in st.session_state:
     st.session_state.upload_count = 5
 
@@ -179,7 +170,6 @@ if not df_questions.empty:
     unit_list = df_questions['權責單位'].dropna().unique().tolist()
     unit_list = [str(u).strip() for u in unit_list if str(u).strip() != '']
     
-    # 1. 請選擇您的單位
     st.markdown("<div class='morandi-select-title'>🏢 請選擇您的單位</div>", unsafe_allow_html=True)
     selected_unit = st.selectbox("", ["請選擇..."] + unit_list, label_visibility="collapsed")
     
@@ -187,7 +177,6 @@ if not df_questions.empty:
         df_unit_questions = df_questions[df_questions['權責單位'].astype(str).str.strip() == selected_unit].copy()
         df_unit_questions['選項標示'] = df_unit_questions['當年度題目'].astype(str) + " - " + df_unit_questions['中文標題'].astype(str)
         
-        # 1. 請選擇填報項目
         st.markdown("<div class='morandi-select-title'>📌 請選擇填報項目</div>", unsafe_allow_html=True)
         selected_option = st.selectbox("", df_unit_questions['選項標示'].tolist(), label_visibility="collapsed")
         
@@ -199,12 +188,15 @@ if not df_questions.empty:
         # 2. 題目標題
         st.markdown(f"<div class='morandi-question-title'>📖 {question_data.get('當年度題目')}：{question_data.get('中文標題')}</div>", unsafe_allow_html=True)
         
-        # 3. 中文說明 (去除前綴字，放大一號字)
+        # 1. 題目說明文字：改為莫蘭迪紅 (粗體加大)
         desc_text = str(question_data.get('中文說明', '無')).replace('中文說明：', '').replace('中文說明:', '').strip()
-        st.markdown(f"<div style='color: #2C3E50; font-size: 1.2em; padding-left: 5px; margin-bottom: 25px;'>{desc_text}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='color: #B85042; font-weight: bold; font-size: 1.3em; padding-left: 5px; margin-bottom: 25px;'>{desc_text}</div>", unsafe_allow_html=True)
+        
+        # 2(1). 增加一個空行區分
+        st.write("")
         
         # ==========================================
-        # 6. 去年度參考資訊 (判斷有無資料)
+        # 6. 去年度參考資訊
         # ==========================================
         prev_q = str(question_data.get('前一年度題目', '')).strip()
         has_prev_data = bool(prev_q and prev_q.lower() not in ['nan', '無', ''])
@@ -218,7 +210,7 @@ if not df_questions.empty:
                 
                 col_pdf, col_trans = st.columns([1, 1])
                 with col_pdf:
-                    st.markdown("#### 📄 前一年度提報內容") # 5. 修改文字
+                    st.markdown("#### 📄 前一年度提報內容") 
                     pdf_id = str(question_data.get('單題PDF_ID', '')).strip()
                     if pdf_id and pdf_id.lower() != 'nan':
                         pdf_url = f"https://drive.google.com/file/d/{pdf_id}/preview"
@@ -227,15 +219,15 @@ if not df_questions.empty:
                         st.info("*(🚧 系統提示：尚無本題專屬的 PDF 原檔可供預覽。)*")
                 
                 with col_trans:
-                    st.markdown("#### 🇹🇼 中文翻譯參考") # 5. 修改文字
+                    st.markdown("#### 🇹🇼 中文翻譯參考")
                     ref_text = question_data.get('2025參考文字_AI預留', '')
                     if pd.notna(ref_text) and str(ref_text).strip() != "":
-                        st.markdown(f'<div class="custom-scrollbar" style="background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 2px solid #E2E7E3; height: 600px; overflow-y: auto; line-height: 1.8; font-size: 1.1em; color: #2C3E50; white-space: pre-wrap;">{ref_text}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="custom-scrollbar" style="background-color: #FFFFFF; padding: 20px; border-radius: 8px; border: 2px solid #E2E7E3; height: 600px; overflow-y: auto; line-height: 1.8; font-size: 1.1em; color: #2C3E50; white-space: pre-wrap;">{ref_text}</div>', unsafe_allow_html=True)
                     else:
                         st.info("*(🚧 系統提示：本題尚無文字資料。)*")
         
         # ==========================================
-        # 7. 🎯 資料填報區 (全新排版設計)
+        # 7. 🎯 資料填報區 
         # ==========================================
         st.markdown("<div class='morandi-orange-title'>資料填報區</div>", unsafe_allow_html=True)
         
@@ -251,27 +243,34 @@ if not df_questions.empty:
         </div>
         """, unsafe_allow_html=True)
         
-        # 7(2) 🔍 請貴單位協助提供下列資料
+        # 3. 請貴單位協助提供下列資料 (莫蘭迪紅字)
         req_text = str(question_data.get('資料需求', '無特別說明')).replace('\n', '<br>')
         st.markdown(f"""
         <div class='light-yellow-box'>
-            <strong style='font-size: 1.4em;'>🔍 請貴單位協助提供下列資料：</strong><br>
-            <div style='font-size: 1.2em; margin-top: 10px; padding-left: 10px;'>{req_text}</div>
+            <strong style='font-size: 1.4em; color: #B85042;'>🔍 請貴單位協助提供下列資料：</strong><br>
+            <div style='font-size: 1.2em; margin-top: 10px; padding-left: 10px; color: #2C3E50;'>{req_text}</div>
         </div>
         """, unsafe_allow_html=True)
         
-        # 7(3) 填報資訊 / 年度執行亮點成果
-        st.markdown("<div class='light-yellow-box'>", unsafe_allow_html=True)
-        st.markdown("<strong style='font-size: 1.2em;'>✍️ 填報資訊 / 年度執行亮點成果</strong>", unsafe_allow_html=True)
-        st.caption("💡 編輯小提示：您可直接使用數字 (1. 2.) 或連字號 (-) 來列出項目符號。")
-        report_text = st.text_area("填寫區", height=200, placeholder="請在此輸入您的填寫內容...", label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
+        # 4 & 5. 填報資訊 / 年度執行亮點成果 (框緊貼輸入區)
+        st.markdown("""
+        <div class='light-yellow-box'>
+            <strong style='font-size: 1.3em;'>✍️ 填報資訊 / 年度執行亮點成果</strong><br>
+            <span style='color: #555555; font-size: 0.95em;'>💡 編輯小提示：您可直接使用數字 (1. 2.) 或連字號 (-) 來列出項目符號。輸入框亦可於右下角手動調整高度</span>
+        </div>
+        """, unsafe_allow_html=True)
+        report_text = st.text_area("填寫區", height=200, placeholder="請在此輸入您的填寫內容...", label_visibility="collapsed", key="report_input")
         
-        # 7(4) 上傳照片或佐證檔案
-        st.markdown("<div class='light-yellow-box'>", unsafe_allow_html=True)
-        st.markdown("<strong style='font-size: 1.2em;'>📎 上傳照片或佐證檔案 (支援 PDF, JPG, PNG, DOCX 等)</strong>", unsafe_allow_html=True)
+        # 6. 上傳照片或佐證檔案
+        st.write("")
+        st.markdown("""
+        <div class='light-yellow-box'>
+            <strong style='font-size: 1.3em;'>📎 請上傳照片或檔案</strong>
+        </div>
+        """, unsafe_allow_html=True)
         
-        # 動態增減檔案區按鈕
+        st.markdown("<div style='color: #2C3E50; font-weight:bold; margin-top:10px; margin-bottom:10px;'>請先設定上傳檔案數量：</div>", unsafe_allow_html=True)
+        
         col_add, col_sub, _ = st.columns([2, 2, 6])
         if col_add.button("➕ 新增一筆檔案區"):
             st.session_state.upload_count += 1
@@ -282,50 +281,64 @@ if not df_questions.empty:
                 st.rerun()
         
         st.write("")
-        upload_data = []
+        # 6(4). 比例改為 1:1，並放大說明文字
         for i in range(st.session_state.upload_count):
-            c1, c2 = st.columns([1, 2])
+            c1, c2 = st.columns([1, 1])
             with c1:
-                desc = st.text_input(f"📌 檔案 {i+1} 資料說明：", key=f"desc_{i}", placeholder="例如：智慧路燈系統畫面")
+                st.markdown(f"<div style='font-size:1.1em; font-weight:bold; margin-bottom:5px; margin-top:5px;'>📌 檔案 {i+1} 資料說明：</div>", unsafe_allow_html=True)
+                st.text_input("說明", key=f"desc_{i}", placeholder="例如：智慧路燈系統畫面", label_visibility="collapsed")
             with c2:
-                file = st.file_uploader(f"📂 選擇檔案 {i+1}", key=f"file_{i}", label_visibility="collapsed")
-            upload_data.append((desc, file))
-        
-        st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='margin-bottom:5px; margin-top:5px;'>&nbsp;</div>", unsafe_allow_html=True) # 對齊用
+                st.file_uploader("選擇檔案", key=f"file_{i}", label_visibility="collapsed")
         
         # ==========================================
-        # 📤 資料送出與自動改名上傳邏輯
+        # 📤 資料送出與寫入資料庫
         # ==========================================
         st.markdown("<br><div style='display: flex; justify-content: center;'>", unsafe_allow_html=True)
         submitted = st.button("📤 資料確認送出", type="primary", use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
         
         if submitted:
-            valid_files = [f for d, f in upload_data if f is not None]
+            # 蒐集有上傳的檔案
+            valid_files = []
+            for i in range(st.session_state.upload_count):
+                f_obj = st.session_state.get(f"file_{i}")
+                f_desc = st.session_state.get(f"desc_{i}", f"未命名附件{i+1}")
+                if f_obj is not None:
+                    valid_files.append({"file": f_obj, "desc": f_desc})
             
             if not report_text.strip() and not valid_files:
                 st.error("⚠️ 請至少填寫成果說明，或上傳一份佐證檔案！")
             else:
-                with st.spinner("⏳ 正在將檔案安全上傳至 Google Drive..."):
-                    upload_success_count = 0
-                    for i, (desc, file) in enumerate(upload_data):
-                        if file is not None:
-                            # 自動組合新檔名：[當年度題目]-[檔案資料說明].[副檔名]
-                            ext = file.name.split('.')[-1]
-                            safe_desc = desc.strip() if desc.strip() else f"未命名附件{i+1}"
-                            new_filename = f"{selected_q_id}-{safe_desc}.{ext}"
-                            
-                            # 執行上傳
-                            file_id = upload_file_to_drive(file, new_filename, DRIVE_UPLOAD_FOLDER_ID)
-                            if file_id:
-                                upload_success_count += 1
-                                
-                if valid_files and upload_success_count == len(valid_files):
-                    st.success(f"🎉 填報成功！共上傳 {upload_success_count} 份檔案至專屬資料夾。")
-                elif valid_files:
-                    st.warning(f"⚠️ 填報完成，但部分檔案上傳失敗 (成功 {upload_success_count}/{len(valid_files)} 份)。")
-                else:
-                    st.success("🎉 文字資料已成功暫存送出！")
+                with st.spinner("⏳ 正在上傳檔案並寫入資料庫..."):
+                    upload_records = []
+                    
+                    # 1. 執行上傳
+                    for i, vf in enumerate(valid_files):
+                        ext = vf['file'].name.split('.')[-1]
+                        safe_desc = vf['desc'].strip() if vf['desc'].strip() else f"未命名附件{i+1}"
+                        new_filename = f"{selected_q_id}-{safe_desc}.{ext}"
+                        
+                        file_id = upload_file_to_drive(vf['file'], new_filename, DRIVE_UPLOAD_FOLDER_ID)
+                        if file_id:
+                            upload_records.append({'desc': safe_desc, 'id': file_id})
+                    
+                    # 2. 寫入資料庫
+                    db_success = write_to_database(
+                        unit=selected_unit, 
+                        q_id=selected_q_id, 
+                        q_title=question_data.get('中文標題', ''), 
+                        report_text=report_text, 
+                        file_records=upload_records
+                    )
+                    
+                    if db_success:
+                        if valid_files and len(upload_records) == len(valid_files):
+                            st.success(f"🎉 填報成功！共上傳 {len(upload_records)} 份檔案，並已成功寫入資料庫。")
+                        elif valid_files:
+                            st.warning(f"⚠️ 資料庫寫入成功，但部分檔案上傳失敗 (成功 {len(upload_records)}/{len(valid_files)} 份)。")
+                        else:
+                            st.success("🎉 文字資料已成功寫入資料庫！")
 
 elif 'df_questions' in locals() and df_questions.empty:
     st.warning("目前資料庫中沒有題目，請確認 Google Sheet 的「評比題目表」是否已填入資料。")
