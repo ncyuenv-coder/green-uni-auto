@@ -9,6 +9,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from docx import Document
 from docx.shared import Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # ==========================================
 # 🌟 全域參數設定
@@ -30,6 +31,23 @@ st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", l
 # ==========================================
 st.markdown("""
 <style>
+    /* 1. 標籤頁 (Tabs) 樣式：淺藍色底色、字體放大2號字 */
+    button[data-baseweb="tab"] {
+        background-color: #E6F0F9 !important;
+        border-radius: 8px 8px 0px 0px !important;
+        margin-right: 4px !important;
+        padding: 10px 20px !important;
+    }
+    button[data-baseweb="tab"] p {
+        font-size: 1.4em !important; 
+        font-weight: bold !important;
+        color: #2C3E50 !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        background-color: #AED6F1 !important;
+        border-bottom: 3px solid #154360 !important;
+    }
+
     .morandi-select-title {
         background-color: #9DAB86; color: white; padding: 12px 15px; border-radius: 6px;
         font-weight: bold; font-size: 1.2em; margin-bottom: 5px; margin-top: 15px;
@@ -43,7 +61,6 @@ st.markdown("""
         font-weight: bold; font-size: 1.6em; margin-bottom: 15px; margin-top: 30px;
         text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    /* 🌟 新增：莫蘭迪深色調標題 (填報資訊/上傳檔案專用) */
     .morandi-dark-title {
         background-color: #5C6B73; color: white; padding: 12px 20px; border-radius: 6px;
         font-weight: bold; font-size: 1.3em; margin-bottom: 10px; margin-top: 15px;
@@ -144,7 +161,26 @@ def write_to_database(unit, q_id, q_title, report_text, file_records):
         st.error(f"⚠️ 寫入資料庫失敗：{e}")
         return False
 
-# 🌟 新增：產生 Word 報告檔案功能
+# 🌟 智慧文字解析引擎：自動縮排與對齊
+def format_report_text_to_html(text):
+    lines = str(text).split('\n')
+    html = ""
+    for line in lines:
+        line = line.strip()
+        if not line:
+            html += "<div style='height: 10px;'></div>"
+            continue
+        # 偵測開頭是否為 1. 或 - 或 • 等項目符號
+        match = re.match(r'^(\d+[\.\)]|[-•*])\s+(.*)', line)
+        if match:
+            marker = match.group(1)
+            content = match.group(2)
+            html += f"<div style='padding-left: 2em; text-indent: -1.5em; margin-bottom: 5px;'>{marker} {content}</div>"
+        else:
+            html += f"<div style='margin-bottom: 5px;'>{line}</div>"
+    return html
+
+# 🌟 新增：產生 Word 報告檔案功能 (2x2 圖片表格，說明文字在圖片下方)
 def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, file_records):
     doc = Document()
     doc.add_heading(f'嘉大綠色大學填報成果 - {unit}', 0)
@@ -161,24 +197,46 @@ def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, 
     doc.add_paragraph(str(report_text))
     
     doc.add_heading('佐證照片/檔案：', level=2)
-    creds = get_gcp_credentials()
-    drive_service = build('drive', 'v3', credentials=creds)
     
-    for f in file_records:
-        doc.add_paragraph(f"📌 {f['desc']}")
-        if f['id']:
-            try:
-                request = drive_service.files().get_media(fileId=f['id'])
-                fh = io.BytesIO()
-                downloader = MediaIoBaseDownload(fh, request)
-                done = False
-                while done is False:
-                    status, done = downloader.next_chunk()
-                fh.seek(0)
-                doc.add_picture(fh, height=Cm(6))
-            except Exception:
-                doc.add_paragraph("(附檔非圖片格式或無法預覽，請至雲端檢視)")
-        doc.add_paragraph("")
+    if file_records:
+        creds = get_gcp_credentials()
+        drive_service = build('drive', 'v3', credentials=creds)
+        
+        # 建立兩兩並排的表格
+        table = doc.add_table(rows=0, cols=2)
+        table.style = 'Table Grid'
+        
+        cells = None
+        for idx, f in enumerate(file_records):
+            if idx % 2 == 0:
+                row = table.add_row()
+                cells = row.cells
+            
+            cell = cells[idx % 2]
+            
+            # 插入圖片
+            p_img = cell.paragraphs[0]
+            p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            if f['id']:
+                try:
+                    request = drive_service.files().get_media(fileId=f['id'])
+                    fh = io.BytesIO()
+                    downloader = MediaIoBaseDownload(fh, request)
+                    done = False
+                    while done is False:
+                        _, done = downloader.next_chunk()
+                    fh.seek(0)
+                    
+                    run = p_img.add_run()
+                    run.add_picture(fh, height=Cm(8)) # 照片統一高度 8 公分
+                except Exception:
+                    p_img.add_run("(圖片無法預覽，請至雲端檢視)")
+            
+            # 插入說明文字 (在圖片下方)
+            p_text = cell.add_paragraph(f"📌 {f['desc']}")
+            p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    else:
+        doc.add_paragraph("此紀錄無上傳任何附件。")
         
     out = io.BytesIO()
     doc.save(out)
@@ -207,6 +265,11 @@ tab_fill, tab_view = st.tabs(["📝 填報區", "📊 檢視填報成果"])
 # 🏷️ TAB 1: 填報區
 # ==========================================
 with tab_fill:
+    # 顯示成功送出的提示 (重整後顯示)
+    if st.session_state.get('submit_success'):
+        st.success("🎉 填報成功！資料已寫入資料庫，頁面已清空，您可繼續填報其他項目！")
+        st.session_state.submit_success = False
+
     with st.spinner('🔄 正在載入最新評比題目...'):
         df_questions = load_gsheet_data()
 
@@ -214,11 +277,11 @@ with tab_fill:
         unit_list = df_questions['權責單位'].dropna().unique().tolist()
         unit_list = [str(u).strip() for u in unit_list if str(u).strip() != '']
         
-        # 1(1) 單位與填報項目放置於同一列
         c_unit, c_item = st.columns(2)
         with c_unit:
             st.markdown("<div class='morandi-select-title'>🏢 請選擇您的單位</div>", unsafe_allow_html=True)
-            selected_unit = st.selectbox("", ["請選擇..."] + unit_list, label_visibility="collapsed", key="sel_unit")
+            # 單位不設定 key 進入 session_state 清空名單，確保它會被保留
+            selected_unit = st.selectbox("", ["請選擇..."] + unit_list, label_visibility="collapsed")
         
         if selected_unit != "請選擇...":
             df_unit_questions = df_questions[df_questions['權責單位'].astype(str).str.strip() == selected_unit].copy()
@@ -233,13 +296,11 @@ with tab_fill:
                 question_data = df_unit_questions[df_unit_questions['當年度題目'].astype(str) == selected_q_id].iloc[0]
                 st.markdown("---")
                 
-                # 題目標題與說明
                 st.markdown(f"<div class='morandi-question-title'>📖 {question_data.get('當年度題目')}：{question_data.get('中文標題')}</div>", unsafe_allow_html=True)
                 desc_text = str(question_data.get('中文說明', '無')).replace('中文說明：', '').replace('中文說明:', '').strip()
                 st.markdown(f"<div style='color: #B85042; font-weight: bold; font-size: 1.3em; padding-left: 5px; margin-bottom: 25px;'>{desc_text}</div>", unsafe_allow_html=True)
                 st.write("")
                 
-                # 去年度參考資訊
                 prev_q = str(question_data.get('前一年度題目', '')).strip()
                 has_prev_data = bool(prev_q and prev_q.lower() not in ['nan', '無', ''])
                 
@@ -267,7 +328,6 @@ with tab_fill:
                 
                 st.markdown("<div class='morandi-orange-title'>資料填報區</div>", unsafe_allow_html=True)
                 
-                # 填報說明
                 st.markdown("""
                 <div class='light-blue-box'>
                     <strong style='font-size: 1.15em;'>提供資料及佐證示意照片說明：</strong><br>
@@ -287,19 +347,16 @@ with tab_fill:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 1(2) 填報資訊 (莫蘭迪深色標題 + 白字)
                 st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
                 report_text = st.text_area("填寫區", height=200, placeholder="請在此輸入您的填寫內容...", label_visibility="collapsed", key="report_input")
-                # 編輯小提示移到下方
                 st.markdown("""
                 <div style='color: #555555; font-size: 1.0em; padding-left: 5px; margin-top: 5px; margin-bottom: 25px; line-height: 1.6;'>
-                    <b>編輯小提示：</b><br>
+                    <b>📝 編輯小提示：</b><br>
                     ．可直接使用數字 (1. 2.) 或連字號 (-) 來列出項目符號。<br>
                     ．可於右下角手動調整輸入框高度，以利檢視。
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 1(3) 上傳照片 (莫蘭迪深色標題 + 白字)
                 st.markdown("<div class='morandi-dark-title'>📎 請上傳照片或檔案</div>", unsafe_allow_html=True)
                 st.markdown("<div style='color: #2C3E50; font-weight:bold; margin-top:10px; margin-bottom:10px;'>請先設定上傳檔案數量：</div>", unsafe_allow_html=True)
                 
@@ -349,9 +406,14 @@ with tab_fill:
                             
                             db_success = write_to_database(selected_unit, selected_q_id, question_data.get('中文標題', ''), report_text, upload_records)
                             if db_success:
-                                load_reported_data.clear() # 清除快取以利Tab2即時顯示
-                                st.success("🎉 填報成功！資料已寫入資料庫，您可至「檢視填報成果」分頁確認或下載 Word 報告。")
-
+                                # 成功送出：清空輸入區塊但保留選擇單位
+                                st.session_state.submit_success = True
+                                for key in list(st.session_state.keys()):
+                                    if key in ["sel_item", "report_input"] or key.startswith("desc_") or key.startswith("file_"):
+                                        del st.session_state[key]
+                                st.session_state.upload_count = 5
+                                load_reported_data.clear() # 清除快取以利 Tab2 即時顯示
+                                st.rerun()
 
 # ==========================================
 # 🏷️ TAB 2: 檢視填報成果
@@ -381,11 +443,8 @@ with tab_view:
                 
             if view_item != "請選擇...":
                 v_q_id = view_item.split(" - ")[0]
-                
-                # 取得最新一筆填報資料
                 latest_record = df_view_unit[df_view_unit['題號'].astype(str) == v_q_id].iloc[-1]
                 
-                # 嘗試從題目表取得原始描述
                 v_q_title = latest_record.get('中文標題', '')
                 v_desc_text, v_req_text = "無", "無特別說明"
                 if 'df_questions' in locals() and not df_questions.empty:
@@ -395,11 +454,9 @@ with tab_view:
                         v_req_text = str(q_match.iloc[0].get('資料需求', '無特別說明'))
                 
                 st.markdown("---")
-                # A. 上方呈現標題與說明 (比照 Tab 1)
                 st.markdown(f"<div class='morandi-question-title'>📖 {v_q_id}：{v_q_title}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='color: #B85042; font-weight: bold; font-size: 1.3em; padding-left: 5px; margin-bottom: 25px;'>{v_desc_text}</div>", unsafe_allow_html=True)
                 
-                # B. 資料需求與填寫內容
                 req_text_html = v_req_text.replace('\n', '<br>')
                 st.markdown(f"""
                 <div class='light-yellow-box'>
@@ -409,16 +466,17 @@ with tab_view:
                 """, unsafe_allow_html=True)
                 
                 st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; white-space: pre-wrap; margin-bottom: 25px;'>{latest_record.get('填報內容', '無')}</div>", unsafe_allow_html=True)
                 
-                # 提取有上傳的檔案
+                # 🌟 透過智慧解析引擎，將填報內容自動排版與縮排
+                formatted_report = format_report_text_to_html(latest_record.get('填報內容', '無'))
+                st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
+                
                 file_records = []
                 for i in range(1, 6):
                     desc = str(latest_record.get(f'檔案{i}_說明', '')).strip()
                     fid = str(latest_record.get(f'檔案{i}_ID', '')).strip()
                     if fid: file_records.append({'desc': desc, 'id': fid})
                 
-                # C. 上傳照片兩兩排列，高度6公分
                 st.markdown("<div class='morandi-dark-title'>📎 佐證照片或檔案</div>", unsafe_allow_html=True)
                 if not file_records:
                     st.info("此紀錄無上傳任何附件。")
@@ -426,11 +484,12 @@ with tab_view:
                     cols = st.columns(2)
                     for idx, f in enumerate(file_records):
                         with cols[idx % 2]:
+                            # 🌟 解決照片無法顯示問題，並強制設定為 8 公分高度
                             st.markdown(f"**📌 {f['desc']}**")
-                            thumb_url = f"https://drive.google.com/thumbnail?sz=w800&id={f['id']}"
-                            st.markdown(f'<img src="{thumb_url}" style="height: 6cm; width: 100%; object-fit: contain; background-color: #f1f1f1; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccc;">', unsafe_allow_html=True)
+                            # 使用 uc?export=view 確保 Google Drive 圖片能被完美渲染
+                            img_url = f"https://drive.google.com/uc?export=view&id={f['id']}"
+                            st.markdown(f'<div style="text-align: center;"><img src="{img_url}" style="height: 8cm; width: 100%; object-fit: contain; background-color: #f1f1f1; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccc;"></div>', unsafe_allow_html=True)
                 
-                # D. 一鍵下載 WORD
                 st.markdown("---")
                 st.markdown("<div style='text-align: center; margin-bottom: 10px;'><b>想要留存這份填報紀錄嗎？</b></div>", unsafe_allow_html=True)
                 with st.spinner("⏳ 正在為您產生 Word 報告檔案..."):
