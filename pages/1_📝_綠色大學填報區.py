@@ -31,21 +31,26 @@ st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", l
 # ==========================================
 st.markdown("""
 <style>
-    /* 1. 標籤頁 (Tabs) 樣式：淺藍色底色、字體放大2號字 */
+    /* 1. 標籤頁 (Tabs) 樣式：未選取為淺藍，選取為深藍底白字 */
     button[data-baseweb="tab"] {
         background-color: #E6F0F9 !important;
         border-radius: 8px 8px 0px 0px !important;
         margin-right: 4px !important;
         padding: 10px 20px !important;
+        transition: all 0.3s ease;
     }
     button[data-baseweb="tab"] p {
         font-size: 1.4em !important; 
         font-weight: bold !important;
         color: #2C3E50 !important;
     }
+    /* 🌟 選取狀態：深藍色底色、白色字體 */
     button[data-baseweb="tab"][aria-selected="true"] {
-        background-color: #AED6F1 !important;
-        border-bottom: 3px solid #154360 !important;
+        background-color: #154360 !important; 
+        border-bottom: 3px solid #0B2331 !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] p {
+        color: #FFFFFF !important;
     }
 
     .morandi-select-title {
@@ -161,7 +166,7 @@ def write_to_database(unit, q_id, q_title, report_text, file_records):
         st.error(f"⚠️ 寫入資料庫失敗：{e}")
         return False
 
-# 🌟 智慧文字解析引擎：自動縮排與對齊
+# 🌟 智慧文字解析引擎：導入 Flexbox 達成完美對齊與縮排
 def format_report_text_to_html(text):
     lines = str(text).split('\n')
     html = ""
@@ -170,17 +175,24 @@ def format_report_text_to_html(text):
         if not line:
             html += "<div style='height: 10px;'></div>"
             continue
+        
         # 偵測開頭是否為 1. 或 - 或 • 等項目符號
-        match = re.match(r'^(\d+[\.\)]|[-•*])\s+(.*)', line)
+        match = re.match(r'^(\d+[\.\)]|[-•*])\s*(.*)', line)
         if match:
             marker = match.group(1)
             content = match.group(2)
-            html += f"<div style='padding-left: 2em; text-indent: -1.5em; margin-bottom: 5px;'>{marker} {content}</div>"
+            # 運用 display: flex，將符號與文字完美分開，文字換行時絕不跑到符號下方
+            html += f"""
+            <div style='display: flex; margin-bottom: 5px; line-height: 1.6;'>
+                <div style='width: 2.2em; flex-shrink: 0; text-align: right; padding-right: 0.5em;'>{marker}</div>
+                <div>{content}</div>
+            </div>
+            """
         else:
-            html += f"<div style='margin-bottom: 5px;'>{line}</div>"
+            html += f"<div style='margin-bottom: 5px; line-height: 1.6;'>{line}</div>"
     return html
 
-# 🌟 新增：產生 Word 報告檔案功能 (2x2 圖片表格，說明文字在圖片下方)
+# 🌟 產生 Word 報告檔案功能 (照片強制 5.5cm x 7.5cm)
 def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, file_records):
     doc = Document()
     doc.add_heading(f'嘉大綠色大學填報成果 - {unit}', 0)
@@ -202,7 +214,6 @@ def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, 
         creds = get_gcp_credentials()
         drive_service = build('drive', 'v3', credentials=creds)
         
-        # 建立兩兩並排的表格
         table = doc.add_table(rows=0, cols=2)
         table.style = 'Table Grid'
         
@@ -214,7 +225,6 @@ def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, 
             
             cell = cells[idx % 2]
             
-            # 插入圖片
             p_img = cell.paragraphs[0]
             p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
             if f['id']:
@@ -228,11 +238,11 @@ def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, 
                     fh.seek(0)
                     
                     run = p_img.add_run()
-                    run.add_picture(fh, height=Cm(8)) # 照片統一高度 8 公分
+                    # 🌟 統一按比例調整為高度 5.5 公分、寬度 7.5 公分
+                    run.add_picture(fh, width=Cm(7.5), height=Cm(5.5))
                 except Exception:
                     p_img.add_run("(圖片無法預覽，請至雲端檢視)")
             
-            # 插入說明文字 (在圖片下方)
             p_text = cell.add_paragraph(f"📌 {f['desc']}")
             p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
     else:
@@ -265,7 +275,6 @@ tab_fill, tab_view = st.tabs(["📝 填報區", "📊 檢視填報成果"])
 # 🏷️ TAB 1: 填報區
 # ==========================================
 with tab_fill:
-    # 顯示成功送出的提示 (重整後顯示)
     if st.session_state.get('submit_success'):
         st.success("🎉 填報成功！資料已寫入資料庫，頁面已清空，您可繼續填報其他項目！")
         st.session_state.submit_success = False
@@ -280,7 +289,6 @@ with tab_fill:
         c_unit, c_item = st.columns(2)
         with c_unit:
             st.markdown("<div class='morandi-select-title'>🏢 請選擇您的單位</div>", unsafe_allow_html=True)
-            # 單位不設定 key 進入 session_state 清空名單，確保它會被保留
             selected_unit = st.selectbox("", ["請選擇..."] + unit_list, label_visibility="collapsed")
         
         if selected_unit != "請選擇...":
@@ -406,13 +414,12 @@ with tab_fill:
                             
                             db_success = write_to_database(selected_unit, selected_q_id, question_data.get('中文標題', ''), report_text, upload_records)
                             if db_success:
-                                # 成功送出：清空輸入區塊但保留選擇單位
                                 st.session_state.submit_success = True
                                 for key in list(st.session_state.keys()):
                                     if key in ["sel_item", "report_input"] or key.startswith("desc_") or key.startswith("file_"):
                                         del st.session_state[key]
                                 st.session_state.upload_count = 5
-                                load_reported_data.clear() # 清除快取以利 Tab2 即時顯示
+                                load_reported_data.clear() 
                                 st.rerun()
 
 # ==========================================
@@ -467,7 +474,6 @@ with tab_view:
                 
                 st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
                 
-                # 🌟 透過智慧解析引擎，將填報內容自動排版與縮排
                 formatted_report = format_report_text_to_html(latest_record.get('填報內容', '無'))
                 st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
                 
@@ -484,10 +490,9 @@ with tab_view:
                     cols = st.columns(2)
                     for idx, f in enumerate(file_records):
                         with cols[idx % 2]:
-                            # 🌟 解決照片無法顯示問題，並強制設定為 8 公分高度
                             st.markdown(f"**📌 {f['desc']}**")
-                            # 使用 uc?export=view 確保 Google Drive 圖片能被完美渲染
-                            img_url = f"https://drive.google.com/uc?export=view&id={f['id']}"
+                            # 🌟 換成 Google 官方的 Thumbnail API，徹底解決照片無法顯示的問題！
+                            img_url = f"https://drive.google.com/thumbnail?id={f['id']}&sz=w1000"
                             st.markdown(f'<div style="text-align: center;"><img src="{img_url}" style="height: 8cm; width: 100%; object-fit: contain; background-color: #f1f1f1; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccc;"></div>', unsafe_allow_html=True)
                 
                 st.markdown("---")
