@@ -4,6 +4,7 @@ import gspread
 import io
 import re
 import datetime
+import base64
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
@@ -31,73 +32,63 @@ st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", l
 # ==========================================
 st.markdown("""
 <style>
-    /* 1. 標籤頁 (Tabs) 樣式：未選取為淺藍，選取為深藍底白字 */
+    /* 1. 標籤頁 (Tabs) 樣式：淺藍色底色、字體放大2號字 */
     button[data-baseweb="tab"] {
         background-color: #E6F0F9 !important;
         border-radius: 8px 8px 0px 0px !important;
         margin-right: 4px !important;
         padding: 10px 20px !important;
-        transition: all 0.3s ease;
+        border: 1px solid #AED6F1 !important;
+        border-bottom: none !important;
     }
-    button[data-baseweb="tab"] p {
-        font-size: 1.4em !important; 
+    button[data-baseweb="tab"] * {
+        font-size: 1.3em !important; 
         font-weight: bold !important;
         color: #2C3E50 !important;
     }
     /* 🌟 選取狀態：深藍色底色、白色字體 */
     button[data-baseweb="tab"][aria-selected="true"] {
-        background-color: #154360 !important; 
+        background-color: #154360 !important;
+        border: 1px solid #0B2331 !important;
         border-bottom: 3px solid #0B2331 !important;
     }
-    button[data-baseweb="tab"][aria-selected="true"] p {
+    button[data-baseweb="tab"][aria-selected="true"] * {
         color: #FFFFFF !important;
     }
 
-    .morandi-select-title {
-        background-color: #9DAB86; color: white; padding: 12px 15px; border-radius: 6px;
-        font-weight: bold; font-size: 1.2em; margin-bottom: 5px; margin-top: 15px;
-    }
-    .morandi-question-title {
-        background-color: #948B89; color: white; padding: 15px 18px; border-radius: 6px;
-        font-weight: bold; font-size: 1.4em; margin-bottom: 15px; margin-top: 10px;
-    }
-    .morandi-orange-title {
-        background-color: #D4A373; color: white; padding: 15px 20px; border-radius: 6px;
-        font-weight: bold; font-size: 1.6em; margin-bottom: 15px; margin-top: 30px;
-        text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .morandi-dark-title {
-        background-color: #5C6B73; color: white; padding: 12px 20px; border-radius: 6px;
-        font-weight: bold; font-size: 1.3em; margin-bottom: 10px; margin-top: 15px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .light-blue-box {
-        background-color: #E6F0F9; color: #2C3E50; padding: 20px; border-left: 6px solid #8FAAB8;
-        border-radius: 6px; margin-bottom: 15px; font-size: 1.05em; line-height: 1.8;
-    }
-    .light-yellow-box {
-        background-color: #FDF6E3; color: #2C3E50; padding: 15px 20px; border-left: 6px solid #E6C27A;
-        border-radius: 6px; margin-bottom: 5px; line-height: 1.6;
-    }
-    [data-testid="stExpander"] details summary {
-        background-color: #2C3E50 !important; color: white !important; border-radius: 6px;
-    }
-    [data-testid="stExpander"] details summary p {
-        color: white !important; font-size: 1.2em !important; font-weight: bold;
-    }
+    .morandi-select-title { background-color: #9DAB86; color: white; padding: 12px 15px; border-radius: 6px; font-weight: bold; font-size: 1.2em; margin-bottom: 5px; margin-top: 15px; }
+    .morandi-question-title { background-color: #948B89; color: white; padding: 15px 18px; border-radius: 6px; font-weight: bold; font-size: 1.4em; margin-bottom: 15px; margin-top: 10px; }
+    .morandi-orange-title { background-color: #D4A373; color: white; padding: 15px 20px; border-radius: 6px; font-weight: bold; font-size: 1.6em; margin-bottom: 15px; margin-top: 30px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .morandi-dark-title { background-color: #5C6B73; color: white; padding: 12px 20px; border-radius: 6px; font-weight: bold; font-size: 1.3em; margin-bottom: 10px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .light-blue-box { background-color: #E6F0F9; color: #2C3E50; padding: 20px; border-left: 6px solid #8FAAB8; border-radius: 6px; margin-bottom: 15px; font-size: 1.05em; line-height: 1.8; }
+    .light-yellow-box { background-color: #FDF6E3; color: #2C3E50; padding: 15px 20px; border-left: 6px solid #E6C27A; border-radius: 6px; margin-bottom: 5px; line-height: 1.6; }
+    
+    [data-testid="stExpander"] details summary { background-color: #2C3E50 !important; color: white !important; border-radius: 6px; }
+    [data-testid="stExpander"] details summary p { color: white !important; font-size: 1.2em !important; font-weight: bold; }
     [data-testid="stExpander"] details summary svg { fill: white !important; }
-    [data-testid="stExpander"] details[open] > div:nth-child(2) {
-        background-color: #F4F6F7 !important; border: 2px solid #2C3E50; border-top: none;
-        border-radius: 0 0 6px 6px; padding: 15px;
+    [data-testid="stExpander"] details[open] > div:nth-child(2) { background-color: #F4F6F7 !important; border: 2px solid #2C3E50; border-top: none; border-radius: 0 0 6px 6px; padding: 15px; }
+    
+    div.stButton > button[kind="secondary"] { background-color: #D6EAF8 !important; color: #154360 !important; border: 1px solid #AED6F1 !important; border-radius: 6px !important; font-weight: bold !important; }
+    div.stButton > button[kind="primary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.4em !important; padding: 12px 30px !important; }
+    
+    /* 🌟 下載 Word 按鈕專屬樣式：莫蘭迪橘底白字 */
+    [data-testid="stDownloadButton"] button {
+        background-color: #D4A373 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: bold !important;
+        font-size: 1.3em !important;
+        padding: 12px 24px !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    div.stButton > button[kind="secondary"] {
-        background-color: #D6EAF8 !important; color: #154360 !important; 
-        border: 1px solid #AED6F1 !important; border-radius: 6px !important; font-weight: bold !important;
-    }
-    div.stButton > button[kind="primary"] {
-        border-radius: 8px !important; font-weight: bold !important; font-size: 1.4em !important; padding: 12px 30px !important;
-    }
+    [data-testid="stDownloadButton"] button:hover { background-color: #C39262 !important; }
+    [data-testid="stDownloadButton"] button * { color: white !important; }
+
     [data-testid="stFileUploadDropzone"] small { display: none !important; }
+    .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #8F9CA3; border-radius: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -123,8 +114,7 @@ def load_gsheet_data():
         df = pd.DataFrame(data)
         df.columns = df.columns.str.strip()
         return df
-    except Exception as e:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def load_reported_data():
@@ -135,8 +125,7 @@ def load_reported_data():
         ws = sh.worksheet("填報資料庫")
         data = ws.get_all_records()
         return pd.DataFrame(data)
-    except:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 def upload_file_to_drive(file_obj, filename, folder_id):
     try:
@@ -146,7 +135,23 @@ def upload_file_to_drive(file_obj, filename, folder_id):
         media = MediaIoBaseUpload(io.BytesIO(file_obj.getvalue()), mimetype=file_obj.type, resumable=True)
         uploaded_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         return uploaded_file.get('id')
-    except:
+    except: return None
+
+# 🌟 透過後台直接下載圖片轉為 Base64 (徹底解決破圖問題)
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_drive_image_b64(file_id):
+    try:
+        creds = get_gcp_credentials()
+        drive_service = build('drive', 'v3', credentials=creds)
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False:
+            _, done = downloader.next_chunk()
+        fh.seek(0)
+        return base64.b64encode(fh.read()).decode('utf-8')
+    except Exception:
         return None
 
 def write_to_database(unit, q_id, q_title, report_text, file_records):
@@ -157,8 +162,7 @@ def write_to_database(unit, q_id, q_title, report_text, file_records):
         ws = sh.worksheet("填報資料庫")
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         row = [now_str, unit, q_id, q_title, report_text]
-        for record in file_records:
-            row.extend([record['desc'], record['id']])
+        for record in file_records: row.extend([record['desc'], record['id']])
         row += [''] * (15 - len(row))
         ws.append_row(row[:15])
         return True
@@ -166,9 +170,13 @@ def write_to_database(unit, q_id, q_title, report_text, file_records):
         st.error(f"⚠️ 寫入資料庫失敗：{e}")
         return False
 
-# 🌟 智慧文字解析引擎：導入 Flexbox 達成完美對齊與縮排
+# 🌟 智慧文字解析引擎：修正換行並達成完美縮排
 def format_report_text_to_html(text):
-    lines = str(text).split('\n')
+    text = str(text)
+    # 修復使用者不小心在「1.」後面按 Enter 導致的斷行問題
+    text = re.sub(r'(^|\n)(\d+[\.\)]|[-•*])\s*\n\s*', r'\1\2 ', text)
+    
+    lines = text.split('\n')
     html = ""
     for line in lines:
         line = line.strip()
@@ -176,23 +184,18 @@ def format_report_text_to_html(text):
             html += "<div style='height: 10px;'></div>"
             continue
         
-        # 偵測開頭是否為 1. 或 - 或 • 等項目符號
         match = re.match(r'^(\d+[\.\)]|[-•*])\s*(.*)', line)
         if match:
             marker = match.group(1)
             content = match.group(2)
-            # 運用 display: flex，將符號與文字完美分開，文字換行時絕不跑到符號下方
-            html += f"""
-            <div style='display: flex; margin-bottom: 5px; line-height: 1.6;'>
-                <div style='width: 2.2em; flex-shrink: 0; text-align: right; padding-right: 0.5em;'>{marker}</div>
-                <div>{content}</div>
-            </div>
-            """
+            html += f"<div style='display: flex; margin-bottom: 5px; line-height: 1.6;'><div style='width: 2.2em; flex-shrink: 0; text-align: right; padding-right: 0.5em;'>{marker}</div><div>{content}</div></div>"
         else:
             html += f"<div style='margin-bottom: 5px; line-height: 1.6;'>{line}</div>"
-    return html
+            
+    # 移除 HTML 字串內的換行符號，避免 Streamlit 的 Markdown 解析器誤判
+    return html.replace('\n', ' ')
 
-# 🌟 產生 Word 報告檔案功能 (照片強制 5.5cm x 7.5cm)
+# 🌟 產生 Word 報告檔案 (統一照片尺寸：高 5.5cm x 寬 7.5cm)
 def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, file_records):
     doc = Document()
     doc.add_heading(f'嘉大綠色大學填報成果 - {unit}', 0)
@@ -224,9 +227,9 @@ def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, 
                 cells = row.cells
             
             cell = cells[idx % 2]
-            
             p_img = cell.paragraphs[0]
             p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
             if f['id']:
                 try:
                     request = drive_service.files().get_media(fileId=f['id'])
@@ -238,11 +241,12 @@ def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, 
                     fh.seek(0)
                     
                     run = p_img.add_run()
-                    # 🌟 統一按比例調整為高度 5.5 公分、寬度 7.5 公分
+                    # 🌟 精準設定尺寸：寬度 7.5cm、高度 5.5cm
                     run.add_picture(fh, width=Cm(7.5), height=Cm(5.5))
                 except Exception:
                     p_img.add_run("(圖片無法預覽，請至雲端檢視)")
             
+            # 圖片說明文字置中於下方
             p_text = cell.add_paragraph(f"📌 {f['desc']}")
             p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
     else:
@@ -474,6 +478,7 @@ with tab_view:
                 
                 st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
                 
+                # 🌟 透過升級版的智慧解析引擎，將填報內容自動排版與完美縮排
                 formatted_report = format_report_text_to_html(latest_record.get('填報內容', '無'))
                 st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
                 
@@ -491,9 +496,13 @@ with tab_view:
                     for idx, f in enumerate(file_records):
                         with cols[idx % 2]:
                             st.markdown(f"**📌 {f['desc']}**")
-                            # 🌟 換成 Google 官方的 Thumbnail API，徹底解決照片無法顯示的問題！
-                            img_url = f"https://drive.google.com/thumbnail?id={f['id']}&sz=w1000"
-                            st.markdown(f'<div style="text-align: center;"><img src="{img_url}" style="height: 8cm; width: 100%; object-fit: contain; background-color: #f1f1f1; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccc;"></div>', unsafe_allow_html=True)
+                            # 🌟 採用 Base64 絕對不破圖方案！
+                            b64_img = get_drive_image_b64(f['id'])
+                            if b64_img:
+                                img_html = f'<div style="text-align: center;"><img src="data:image/jpeg;base64,{b64_img}" style="height: 8cm; width: 100%; object-fit: contain; background-color: #f1f1f1; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccc;"></div>'
+                                st.markdown(img_html, unsafe_allow_html=True)
+                            else:
+                                st.warning("⚠️ 圖片無法預覽，請確認檔案是否為圖片格式。")
                 
                 st.markdown("---")
                 st.markdown("<div style='text-align: center; margin-bottom: 10px;'><b>想要留存這份填報紀錄嗎？</b></div>", unsafe_allow_html=True)
