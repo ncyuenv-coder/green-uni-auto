@@ -35,75 +35,29 @@ st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", l
 # ==========================================
 st.markdown("""
 <style>
-    /* 標籤頁 (Tabs) 樣式 */
-    button[data-baseweb="tab"] { 
-        background-color: #E6F0F9 !important; 
-        border-radius: 8px 8px 0px 0px !important; 
-        margin-right: 4px !important; 
-        padding: 10px 20px !important; 
-        border: 1px solid #AED6F1 !important; 
-        border-bottom: none !important; 
-        transition: all 0.3s ease; 
-    }
-    button[data-baseweb="tab"] p { 
-        font-size: 1.4em !important; 
-        font-weight: bold !important; 
-        color: #2C3E50 !important; 
-    }
-    /* 選取狀態 */
-    button[data-baseweb="tab"][aria-selected="true"] { 
-        background-color: #154360 !important; 
-        border: 1px solid #0B2331 !important; 
-        border-bottom: 3px solid #0B2331 !important; 
-    }
-    button[data-baseweb="tab"][aria-selected="true"] p { 
-        color: #FFFFFF !important; 
-    }
+    button[data-baseweb="tab"] { background-color: #E6F0F9 !important; border-radius: 8px 8px 0px 0px !important; margin-right: 4px !important; padding: 10px 20px !important; border: 1px solid #AED6F1 !important; border-bottom: none !important; transition: all 0.3s ease; }
+    button[data-baseweb="tab"] p { font-size: 1.4em !important; font-weight: bold !important; color: #2C3E50 !important; }
+    button[data-baseweb="tab"][aria-selected="true"] { background-color: #154360 !important; border: 1px solid #0B2331 !important; border-bottom: 3px solid #0B2331 !important; }
+    button[data-baseweb="tab"][aria-selected="true"] p { color: #FFFFFF !important; }
 
-    /* 各區塊標題 */
-    .morandi-select-title { 
-        background-color: #9DAB86; color: white; padding: 12px 15px; 
-        border-radius: 6px; font-weight: bold; font-size: 1.2em; 
-        margin-bottom: 5px; margin-top: 15px; 
-    }
-    .morandi-question-title { 
-        background-color: #948B89; color: white; padding: 15px 18px; 
-        border-radius: 6px; font-weight: bold; font-size: 1.4em; 
-        margin-bottom: 15px; margin-top: 10px; 
-    }
-    .morandi-orange-title { 
-        background-color: #D4A373; color: white; padding: 15px 20px; 
-        border-radius: 6px; font-weight: bold; font-size: 1.6em; 
-        margin-bottom: 15px; margin-top: 30px; text-align: center; 
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
-    }
-    .morandi-dark-title { 
-        background-color: #5C6B73; color: white; padding: 12px 20px; 
-        border-radius: 6px; font-weight: bold; font-size: 1.3em; 
-        margin-bottom: 10px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
-    }
+    .morandi-select-title { background-color: #9DAB86; color: white; padding: 12px 15px; border-radius: 6px; font-weight: bold; font-size: 1.2em; margin-bottom: 5px; margin-top: 15px; }
+    .morandi-question-title { background-color: #948B89; color: white; padding: 15px 18px; border-radius: 6px; font-weight: bold; font-size: 1.4em; margin-bottom: 15px; margin-top: 10px; }
+    .morandi-orange-title { background-color: #D4A373; color: white; padding: 15px 20px; border-radius: 6px; font-weight: bold; font-size: 1.6em; margin-bottom: 15px; margin-top: 30px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .morandi-dark-title { background-color: #5C6B73; color: white; padding: 12px 20px; border-radius: 6px; font-weight: bold; font-size: 1.3em; margin-bottom: 10px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     
-    /* 內容底色區塊 */
     .light-blue-box { background-color: #E6F0F9; color: #2C3E50; padding: 20px; border-left: 6px solid #8FAAB8; border-radius: 6px; margin-bottom: 15px; font-size: 1.05em; line-height: 1.8; }
     .light-yellow-box { background-color: #FDF6E3; color: #2C3E50; padding: 15px 20px; border-left: 6px solid #E6C27A; border-radius: 6px; margin-bottom: 5px; line-height: 1.6; }
     .light-brown-box { background-color: #F5EBE0; color: #2C3E50; padding: 15px 20px; border-left: 6px solid #D4A373; border-radius: 6px; margin-bottom: 5px; line-height: 1.6; }
     
-    /* 折疊面板 */
     [data-testid="stExpander"] details summary { background-color: #2C3E50 !important; color: white !important; border-radius: 6px; }
     [data-testid="stExpander"] details summary p { color: white !important; font-size: 1.2em !important; font-weight: bold; }
     [data-testid="stExpander"] details summary svg { fill: white !important; }
     [data-testid="stExpander"] details[open] > div:nth-child(2) { background-color: #F4F6F7 !important; border: 2px solid #2C3E50; border-top: none; border-radius: 0 0 6px 6px; padding: 15px; }
     
-    /* 按鈕樣式 */
     div.stButton > button[kind="secondary"] { background-color: #D6EAF8 !important; color: #154360 !important; border: 1px solid #AED6F1 !important; border-radius: 6px !important; font-weight: bold !important; }
     div.stButton > button[kind="primary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.4em !important; padding: 12px 30px !important; }
     
-    /* 下載 Word 按鈕專屬樣式：莫蘭迪橘底白字 */
-    [data-testid="stDownloadButton"] button {
-        background-color: #D4A373 !important; color: white !important; border: none !important;
-        border-radius: 8px !important; font-weight: bold !important; font-size: 1.3em !important;
-        padding: 12px 24px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
+    [data-testid="stDownloadButton"] button { background-color: #D4A373 !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: bold !important; font-size: 1.3em !important; padding: 12px 24px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     [data-testid="stDownloadButton"] button:hover { background-color: #C39262 !important; }
     [data-testid="stDownloadButton"] button * { color: white !important; }
 
@@ -185,7 +139,7 @@ def upload_file_to_drive(file_obj, filename, folder_id):
     except Exception as e: return None
 
 # ==========================================
-# 🌟 智慧判斷檔案格式與照片方向
+# 🌟 智慧判斷檔案格式、照片方向與「全景圖偵測」
 # ==========================================
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_file_info(file_id, desc=""):
@@ -194,8 +148,10 @@ def get_file_info(file_id, desc=""):
         drive_service = build('drive', 'v3', credentials=creds)
         meta = drive_service.files().get(fileId=file_id, fields='mimeType').execute()
         mime_type = meta.get('mimeType', '')
+        
         is_pdf = 'pdf' in mime_type.lower()
         is_image = mime_type.startswith('image/')
+        
         request = drive_service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -205,14 +161,18 @@ def get_file_info(file_id, desc=""):
         file_bytes = fh.read()
         
         is_landscape = True
+        is_panorama = False # 新增全景圖偵測
         if is_image:
             try:
                 img = Image.open(io.BytesIO(file_bytes))
-                if img.width < img.height: is_landscape = False
+                ratio = img.width / img.height
+                if ratio < 1.0: is_landscape = False
+                # 🌟 如果寬度是高度的 1.9 倍以上，判定為全景橫幅
+                if ratio >= 1.9: is_panorama = True 
             except Exception: pass
             
         b64_str = base64.b64encode(file_bytes).decode('utf-8') if is_image else ""
-        return {'id': file_id, 'desc': desc, 'is_pdf': is_pdf, 'is_image': is_image, 'is_landscape': is_landscape, 'b64': b64_str, 'mime_type': mime_type}
+        return {'id': file_id, 'desc': desc, 'is_pdf': is_pdf, 'is_image': is_image, 'is_landscape': is_landscape, 'is_panorama': is_panorama, 'b64': b64_str, 'mime_type': mime_type}
     except Exception as e: return None
 
 def write_to_database(unit, reporter, ext, email, q_id, q_title, report_text, file_records):
@@ -227,10 +187,12 @@ def write_to_database(unit, reporter, ext, email, q_id, q_title, report_text, fi
         while len(row) < 28: row.append('')
         ws.append_row(row[:28])
         return True
-    except Exception as e: return False
+    except Exception as e: 
+        st.error(f"寫入資料庫失敗：{e}")
+        return False
 
 # ==========================================
-# 🌟 智慧文字解析引擎：網頁完美縮排
+# 🌟 公文級文字解析引擎：網頁完美縮排對齊
 # ==========================================
 def format_report_text_to_html(text):
     text = str(text)
@@ -238,17 +200,23 @@ def format_report_text_to_html(text):
     html = ""
     for line in text.split('\n'):
         line = line.strip()
-        if not line: html += "<div style='height: 10px;'></div>"; continue
-        match = re.match(r'^(\d+[\.\)]|[-•*])\s*(.*)', line)
+        if not line: 
+            html += "<div style='height: 10px;'></div>"
+            continue
+        
+        # 🌟 強化正則表達式，支援「1.」「2、」「(1)」「（一）」「-」「•」等多種公文常見標號
+        match = re.match(r'^([0-9a-zA-Z]+[\.、\)]|[\(（][0-9a-zA-Z一二三四五六七八九十]+[\)）]|[一二三四五六七八九十]+、|[-•*])\s*(.*)', line)
         if match: 
             marker = match.group(1)
             content = match.group(2)
-            html += f"<div style='display: flex; margin-bottom: 5px; line-height: 1.6;'><div style='width: 2.2em; flex-shrink: 0; text-align: right; padding-right: 0.5em;'>{marker}</div><div>{content}</div></div>"
-        else: html += f"<div style='margin-bottom: 5px; line-height: 1.6;'>{line}</div>"
+            # 設定左側預留空間，讓後續換行文字完美對齊
+            html += f"<div style='display: flex; margin-bottom: 5px; line-height: 1.6;'><div style='width: 2.5em; flex-shrink: 0; text-align: right; padding-right: 0.5em;'>{marker}</div><div>{content}</div></div>"
+        else: 
+            html += f"<div style='margin-bottom: 5px; line-height: 1.6;'>{line}</div>"
     return html.replace('\n', ' ')
 
 # ==========================================
-# 🌟 Word 報告產製引擎 (真正實體換行 + 完美懸掛縮排)
+# 🌟 Word 報告產製引擎 (公文級排版 + 全景圖支援)
 # ==========================================
 def set_run_font(run):
     run.font.name = 'Times New Roman'
@@ -264,12 +232,11 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
         
     doc.add_heading(f'{q_id} {q_title}', level=1)
     
-    # 🌟 題目說明：改為逐段獨立寫入，避免版面因軟換行撐破
+    # 🌟 真正段落換行 (Enter)，避免版面跑掉
     doc.add_heading('題目說明：', level=2)
     for line in str(desc_text).replace('\r', '').split('\n'):
         if line.strip(): doc.add_paragraph(line.strip())
     
-    # 🌟 資料需求：改為逐段獨立寫入
     doc.add_heading('資料需求：', level=2)
     clean_req = str(req_text).replace('<br>', '\n').replace('<b>', '').replace('</b>', '')
     for line in clean_req.replace('\r', '').split('\n'):
@@ -278,33 +245,56 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
     doc.add_heading('填報資訊 / 年度執行亮點成果：', level=2)
     report_text_clean = re.sub(r'(^|\n)(\d+[\.\)]|[-•*])\s*\n\s*', r'\1\2 ', str(report_text))
     
-    # 🌟 項目符號智慧縮排：使用 Word 懸掛縮排 + 定位點
+    # 🌟 項目符號智慧懸掛縮排
     for line in report_text_clean.replace('\r', '').split('\n'):
         line = line.strip()
         if not line: continue
             
         p = doc.add_paragraph()
-        match = re.match(r'^(\d+[\.\)]|[-•*])\s+(.*)', line)
+        match = re.match(r'^([0-9a-zA-Z]+[\.、\)]|[\(（][0-9a-zA-Z一二三四五六七八九十]+[\)）]|[一二三四五六七八九十]+、|[-•*])\s*(.*)', line)
         if match:
             marker = match.group(1)
             content = match.group(2)
-            # 設定左側縮排與首行凸排，創造完美的懸掛效果
-            p.paragraph_format.left_indent = Cm(0.8)
-            p.paragraph_format.first_line_indent = Cm(-0.8)
-            # 利用 \t (Tab) 確保文字乖乖對齊到左側縮排線
+            # 懸掛縮排設定：左側縮進 1 公分，第一行凸出 1 公分
+            p.paragraph_format.left_indent = Cm(1.0)
+            p.paragraph_format.first_line_indent = Cm(-1.0)
+            # 使用 \t 定位點確保內容對齊
             p.add_run(f"{marker}\t{content}")
         else:
             p.add_run(line)
     
     doc.add_heading('佐證照片/檔案：', level=2)
     
-    landscapes, portraits, other_docs = [], [], []
-    for f in enriched_files:
-        if f.get('is_image'):
-            if f.get('is_landscape'): landscapes.append(f)
-            else: portraits.append(f)
-        else: other_docs.append(f)
+    # 🌟 分離：全景圖、一般橫式、直式、文件
+    panoramas = [f for f in enriched_files if f.get('is_image') and f.get('is_panorama')]
+    landscapes = [f for f in enriched_files if f.get('is_image') and f.get('is_landscape') and not f.get('is_panorama')]
+    portraits = [f for f in enriched_files if f.get('is_image') and not f.get('is_landscape')]
+    other_docs = [f for f in enriched_files if not f.get('is_image')]
     
+    # 1. 處理全景圖 (單獨佔據一整列，寬度加大)
+    for pano in panoramas:
+        table = doc.add_table(rows=1, cols=1)
+        table.style = 'Table Grid'
+        cell = table.cell(0, 0)
+        p_img = cell.paragraphs[0]
+        p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        try:
+            img_bytes = base64.b64decode(pano['b64'])
+            fh = io.BytesIO(img_bytes)
+            # 全景圖寬度設為 15 公分
+            inline = p_img.add_run().add_picture(fh, width=Cm(15.0))
+            try:
+                pic_xml = inline._inline.xpath('.//pic:pic')[0]
+                spPr = pic_xml.xpath('.//pic:spPr')[0]
+                effectLst_xml = '<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'
+                spPr.append(parse_xml(effectLst_xml))
+            except Exception: pass
+        except Exception: p_img.add_run("(圖片無法插入)")
+        p_text = cell.add_paragraph(f"{pano['desc']}")
+        p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph("") # 加空行區隔
+    
+    # 2. 處理一般配對照片
     pairs = []
     for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
     rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
@@ -319,7 +309,6 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
     if len(pairs) > 0:
         table = doc.add_table(rows=0, cols=2)
         table.style = 'Table Grid'
-        
         for p1, p2 in pairs:
             row = table.add_row()
             for idx, f in enumerate([p1, p2]):
@@ -339,18 +328,17 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
                             spPr.append(parse_xml(effectLst_xml))
                         except Exception: pass
                     except Exception: p_img.add_run("(圖片無法插入)")
-                    
                     p_text = cell.add_paragraph(f"{f['desc']}")
                     p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
+    # 3. 處理文件
     if len(other_docs) > 0:
         for f in other_docs:
             p = doc.add_paragraph()
-            ftype = "PDF 檔案" if f.get('is_pdf') else "其他文件"
-            p.add_run(f"📌 {f['desc']} (此為 {ftype})").bold = True
+            p.add_run(f"📌 {f['desc']}").bold = True
             p.add_run(f"\n🔗 請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
             
-    if len(pairs) == 0 and len(other_docs) == 0: 
+    if len(panoramas) == 0 and len(pairs) == 0 and len(other_docs) == 0: 
         doc.add_paragraph("此紀錄無上傳任何附件。")
     
     for p in doc.paragraphs:
@@ -552,7 +540,7 @@ with tab_fill:
                                 st.rerun()
 
 # ==========================================
-# 🏷️ TAB 2: 檢視填報成果 (左右雙欄完美排版)
+# 🏷️ TAB 2: 檢視填報成果 (左右 4:6 黃金排版)
 # ==========================================
 with tab_view:
     df_reported = load_reported_data()
@@ -586,7 +574,7 @@ with tab_view:
                 st.markdown("<div class='morandi-select-title'>📌 請選擇已填報之項目</div>", unsafe_allow_html=True)
                 view_item = st.selectbox("", ["請選擇..."] + rep_items, label_visibility="collapsed", key="v_item")
                 
-            if view_item != "請選擇...":
+            if view_item != "請选择...":
                 v_q_id = view_item.split(" - ")[0]
                 latest_record = df_view_unit[df_view_unit['題號'].astype(str) == v_q_id].iloc[-1]
                 
@@ -602,7 +590,7 @@ with tab_view:
                 
                 st.markdown("---")
                 
-                # 🌟 填報人資訊深灰色字體、放大一號字體
+                # 🌟 填報人資訊深灰色字體、放大一號
                 v_reporter = latest_record.get('填報人', '無')
                 v_ext = latest_record.get('填報人分機', '無')
                 v_email = latest_record.get('填報人電子郵件', '無')
@@ -618,11 +606,11 @@ with tab_view:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 🌟 版面切分為左右兩邊
-                col_left, col_right = st.columns([1, 1])
+                # 🌟 版面切分為左右 4:6 黃金比例
+                col_left, col_right = st.columns([4, 6])
                 
                 # ==========================
-                # 左邊：填報資訊區
+                # 左邊 (40%)：填報資訊區
                 # ==========================
                 with col_left:
                     st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
@@ -630,7 +618,7 @@ with tab_view:
                     st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
                 
                 # ==========================
-                # 右邊：佐證照片或檔案區
+                # 右邊 (60%)：佐證照片或檔案區
                 # ==========================
                 with col_right:
                     st.markdown("<div class='morandi-dark-title'>📎 佐證照片或檔案</div>", unsafe_allow_html=True)
@@ -646,43 +634,51 @@ with tab_view:
                         info = get_file_info(rf['id'], rf['desc'])
                         if info: enriched_files.append(info)
                     
-                    landscapes, portraits, other_docs = [], [], []
-                    for f in enriched_files:
-                        if f.get('is_image'):
-                            if f.get('is_landscape'): landscapes.append(f)
-                            else: portraits.append(f)
-                        else: other_docs.append(f)
+                    panoramas = [f for f in enriched_files if f.get('is_image') and f.get('is_panorama')]
+                    landscapes = [f for f in enriched_files if f.get('is_image') and f.get('is_landscape') and not f.get('is_panorama')]
+                    portraits = [f for f in enriched_files if f.get('is_image') and not f.get('is_landscape')]
+                    other_docs = [f for f in enriched_files if not f.get('is_image')]
                     
-                    pairs = []
-                    for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
-                    rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
-                    for i in range(0, len(portraits) - 1, 2): pairs.append((portraits[i], portraits[i+1]))
-                    rem_p = portraits[-1] if len(portraits) % 2 != 0 else None
-                    
-                    if rem_l and rem_p: pairs.append((rem_l, rem_p))
-                    elif rem_l: pairs.append((rem_l, None))
-                    elif rem_p: pairs.append((rem_p, None))
-                    
-                    if len(pairs) == 0 and len(other_docs) == 0: 
+                    if len(enriched_files) == 0:
                         st.info("此紀錄無上傳任何附件。")
                     else:
+                        # 🌟 1. 處理全景圖 (單獨顯示，不切割)
+                        for pano in panoramas:
+                            st.markdown(f"**📌 {pano['desc']}**")
+                            img_html = f"""
+                            <div style="text-align: center;">
+                                <img src="data:{pano['mime_type']};base64,{pano['b64']}" 
+                                     style="width: 100%; height: auto; object-fit: contain; background-color: #f1f1f1; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccc; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            </div>
+                            """
+                            st.markdown(img_html, unsafe_allow_html=True)
+
+                        # 🌟 2. 處理一般照片 (並排顯示，取消 cover 裁切，保證完整呈現)
+                        pairs = []
+                        for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
+                        rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
+                        for i in range(0, len(portraits) - 1, 2): pairs.append((portraits[i], portraits[i+1]))
+                        rem_p = portraits[-1] if len(portraits) % 2 != 0 else None
+                        
+                        if rem_l and rem_p: pairs.append((rem_l, rem_p))
+                        elif rem_l: pairs.append((rem_l, None))
+                        elif rem_p: pairs.append((rem_p, None))
+                        
                         for p1, p2 in pairs:
-                            # 即使在右半邊欄位內，依然可以繼續切分 2 欄並排顯示照片
                             cols = st.columns(2)
                             for idx, f in enumerate([p1, p2]):
                                 if f:
                                     with cols[idx]:
                                         st.markdown(f"**📌 {f['desc']}**")
-                                        # 🌟 透過 object-fit: cover 完美鎖定框格比例，畫面絕對整齊
-                                        ratio = "7.5 / 5.5" if f['is_landscape'] else "7 / 9"
                                         img_html = f"""
                                         <div style="text-align: center;">
                                             <img src="data:{f['mime_type']};base64,{f['b64']}" 
-                                                 style="aspect-ratio: {ratio}; width: 100%; object-fit: cover; background-color: #f1f1f1; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccc; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                                                 style="width: 100%; height: auto; object-fit: contain; background-color: #f1f1f1; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccc; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                                         </div>
                                         """
                                         st.markdown(img_html, unsafe_allow_html=True)
                         
+                        # 🌟 3. 處理其他文件
                         if len(other_docs) > 0:
                             for f in other_docs:
                                 drive_link = f"https://drive.google.com/file/d/{f['id']}/view"
