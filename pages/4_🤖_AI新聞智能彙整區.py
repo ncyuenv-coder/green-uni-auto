@@ -79,47 +79,38 @@ def save_to_ai_db(record):
         return False
 
 # ==========================================
-# 🕷️ 智慧深潛版：嘉大新聞網頁爬蟲 (突破 SSL 防護版 + 置頂防禦)
+# 🕷️ 階段一：快速掃描新聞列表 (僅抓標題、日期、連結)
 # ==========================================
-def scrape_ncyu_news(start_date, end_date):
+def get_news_list(start_date, end_date):
     base_url = "https://www.ncyu.edu.tw"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    news_items = []
+    news_list = []
     seen_links = set()
-    
     page = 1
     stop_scraping = False
-    old_news_count = 0 # 🌟 置頂文章防禦器
+    old_news_count = 0 
     
     while page <= 40 and not stop_scraping:
         list_url = f"{base_url}/ncyu/Subject?nodeId=835&page={page}"
-        st.toast(f"📄 正在掃描第 {page} 頁新聞...", icon="👀")
-        
         try:
             req = requests.get(list_url, headers=headers, timeout=10, verify=False)
             req.encoding = 'utf-8'
             soup = BeautifulSoup(req.text, 'html.parser')
-            
             links = soup.find_all('a', href=True)
             has_news_in_page = False
             
             for a in links:
                 href = a['href']
-                # 🌟 修正：真實的新聞內文連結特徵為 /Subject/Detail/
                 if 'Subject/Detail/' in href and 'nodeId=835' in href:
                     has_news_in_page = True
                     
-                    if href.startswith('http'):
-                        full_link = href
-                    elif href.startswith('/'):
-                        full_link = base_url + href
-                    else:
-                        full_link = base_url + "/ncyu/" + href
+                    if href.startswith('http'): full_link = href
+                    elif href.startswith('/'): full_link = base_url + href
+                    else: full_link = base_url + "/ncyu/" + href
                         
                     if full_link in seen_links: continue
                     seen_links.add(full_link)
                     
-                    # 尋找日期 (利用向上尋找容器來提取文字，避免被切斷)
                     container = a.find_parent(['tr', 'li', 'div', 'td'])
                     parent_text = container.text if container else a.parent.text
                     date_match = re.search(r'20\d{2}[-/.]\d{2}[-/.]\d{2}', parent_text)
@@ -128,59 +119,56 @@ def scrape_ncyu_news(start_date, end_date):
                         date_str = date_match.group().replace('/', '-').replace('.', '-')
                         news_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
                         
-                        # 🌟 置頂防禦邏輯：連續遇到 5 篇舊新聞，才代表真的到底了
                         if news_date < start_date:
                             old_news_count += 1
                             if old_news_count > 5:
                                 stop_scraping = True
                                 break
                         else:
-                            old_news_count = 0 # 遇到新日期，計數器歸零
+                            old_news_count = 0 
                         
                         if start_date <= news_date <= end_date:
                             title = a.get('title', '').strip() or a.text.strip()
                             title = re.sub(r'\s+', ' ', title) 
+                            news_list.append({"新聞日期": date_str, "新聞標題": title, "新聞連結": full_link})
                             
-                            try:
-                                d_req = requests.get(full_link, headers=headers, timeout=10, verify=False)
-                                d_req.encoding = 'utf-8'
-                                d_soup = BeautifulSoup(d_req.text, 'html.parser')
-                                
-                                content_div = d_soup.find('div', class_=re.compile(r'content|mcont|user_edit|article', re.I))
-                                if not content_div: content_div = d_soup.find('body')
-                                
-                                for script in content_div(["script", "style"]): script.decompose()
-                                full_text = content_div.text.strip()
-                                full_text = re.sub(r'\n+', '\n', full_text)
-                                
-                                img_urls = []
-                                for img in content_div.find_all('img'):
-                                    src = img.get('src')
-                                    if src and not src.startswith('data:'):
-                                        img_link = src if src.startswith('http') else base_url + src
-                                        if 'icon' not in img_link.lower() and 'logo' not in img_link.lower():
-                                            img_urls.append(img_link)
-                                
-                                news_items.append({
-                                    "新聞日期": date_str, "新聞標題": title,
-                                    "原始內容": full_text[:2000], 
-                                    "照片清單": img_urls, "新聞連結": full_link
-                                })
-                                time.sleep(0.2) 
-                            except Exception as e:
-                                pass 
-            
-            if not has_news_in_page:
-                break 
-                
+            if not has_news_in_page: break 
         except Exception as e:
-            st.warning(f"第 {page} 頁抓取失敗: {e}")
             break
-            
         page += 1
-        time.sleep(0.3)
+        time.sleep(0.2)
         
-    return news_items
+    return news_list
+
+# ==========================================
+# 🕷️ 階段二：精準抓取內文與照片 (僅對命中的新聞執行)
+# ==========================================
+def get_news_content(url):
+    base_url = "https://www.ncyu.edu.tw"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    try:
+        d_req = requests.get(url, headers=headers, timeout=10, verify=False)
+        d_req.encoding = 'utf-8'
+        d_soup = BeautifulSoup(d_req.text, 'html.parser')
+        
+        content_div = d_soup.find('div', class_=re.compile(r'content|mcont|user_edit|article', re.I))
+        if not content_div: content_div = d_soup.find('body')
+        
+        for script in content_div(["script", "style"]): script.decompose()
+        full_text = content_div.text.strip()
+        full_text = re.sub(r'\n+', '\n', full_text)
+        
+        img_urls = []
+        for img in content_div.find_all('img'):
+            src = img.get('src')
+            if src and not src.startswith('data:'):
+                img_link = src if src.startswith('http') else base_url + src
+                if 'icon' not in img_link.lower() and 'logo' not in img_link.lower():
+                    img_urls.append(img_link)
+                    
+        return {"原始內容": full_text[:2000], "照片清單": img_urls}
+    except Exception as e:
+        return {"原始內容": "無法擷取內文", "照片清單": []}
 
 # ==========================================
 # 🧠 Gemini AI 判斷與生成引擎 (語意理解)
@@ -188,32 +176,25 @@ def scrape_ncyu_news(start_date, end_date):
 def process_news_with_ai(news_item, q_id, q_title, q_desc):
     prompt = f"""
     你現在是大學永續發展(SDGs)評比的資深專家。
-    請根據以下【新聞內容】，以「語意理解」的方式判斷該新聞的實質內容是否符合評比題目『{q_title}』的範疇。
-    請特別注意：不需要新聞中有出現完全一樣的字眼，只要其背後精神與行動符合以下【判斷準則】即算有關聯。
+    我們已經確認這篇新聞的標題符合關鍵字，請根據以下【新聞內容】，將其濃縮精華。
     
-    【判斷準則/關鍵字】：{q_desc}
-    
+    【評比題目】：{q_title}
     【新聞標題】：{news_item['新聞標題']}
     【新聞內容】：{news_item['原始內容']}
     
     任務要求：
-    1. 如果這篇新聞與題目的精神與範疇「完全無關」，請你【僅回覆】五個字：「不符合此題」。
-    2. 如果這篇新聞與題目「有關聯」，請你將新聞濃縮精華簡寫為 150~300 字。
-    3. 濃縮內容若有列點，請使用「1. 」「2. 」的格式，且文字要專業俐落。
-    4. 請在摘要的最下方，獨立一行，智慧判斷並明確標註這篇新聞對應的 SDGs 指標 (例如：【對應SDGs】：SDG 4 優質教育)。
+    1. 將新聞濃縮精華簡寫為 150~300 字，重點放在與題目相關的行動或成效。
+    2. 濃縮內容若有列點，請使用「1. 」「2. 」的格式，且文字要專業俐落。
+    3. 請在摘要的最下方，獨立一行，智慧判斷並明確標註這篇新聞對應的 SDGs 指標 (例如：【對應SDGs】：SDG 4 優質教育)。
     """
     try:
         response = ai_model.generate_content(prompt)
-        ai_result = response.text.strip()
-        
-        if "不符合此題" in ai_result:
-            return None 
-        return ai_result
+        return response.text.strip()
     except Exception as e:
         return f"AI 處理失敗：{e}"
 
 # ==========================================
-# 🌟 Word 產製引擎 (照片網格 + 完美縮排)
+# 🌟 Word 產製引擎
 # ==========================================
 def url_to_bytes(url):
     try:
@@ -320,53 +301,92 @@ with tab_ai:
     with c_start: start_date = st.date_input("新聞起日", datetime.date(2024, 1, 1))
     with c_end: end_date = st.date_input("新聞迄日", datetime.date.today())
     
-    st.info("💡 系統將讀取《原始新聞抓取》總表，根據題意自動爬取此區間內的嘉大新聞。只要新聞內文的精神符合題目的『關鍵字或判斷準則』，Gemini 即會將其篩選出並濃縮摘要存入資料庫。")
+    st.info("💡 系統會先比對「新聞標題」與您設定的「搜尋關鍵字」(可多個，以「、」分隔)，命中後才會抓取完整內文並交由 Gemini 摘要，大幅提升處理效率！")
     
-    if st.button("🚀 開始啟動 AI 批次抓取與彙整", type="primary", use_container_width=True):
-        with st.spinner("🤖 爬蟲已啟動！會一頁頁往前挖新聞，這是一個極度耗時的任務，請耐心等候，切勿關閉網頁..."):
+    if st.button("🚀 開始啟動關鍵字爬取與 AI 彙整", type="primary", use_container_width=True):
+        with st.spinner("🤖 正在掃描新聞列表並比對關鍵字，請勿關閉網頁..."):
             
             df_targets = load_sheet("原始新聞抓取")
             if df_targets.empty:
                 st.error("❌ 找不到《原始新聞抓取》工作表，或表內無資料！")
             else:
-                scraped_news = scrape_ncyu_news(start_date, end_date)
+                # 階段一：僅抓取清單
+                st.toast("🕷️ 階段一：正在快速掃描新聞列表...", icon="👀")
+                basic_news_list = get_news_list(start_date, end_date)
                 
-                if not scraped_news:
-                    st.warning(f"爬蟲已徹底翻找，但在 {start_date} 至 {end_date} 區間內未抓取到任何新聞公告。")
+                if not basic_news_list:
+                    st.warning(f"在 {start_date} 至 {end_date} 區間內未抓取到任何新聞清單。")
                 else:
-                    st.toast(f"✅ 成功抓取 {len(scraped_news)} 篇在區間內的新聞，準備交給 AI 逐題判斷...", icon="🧠")
+                    st.toast(f"✅ 成功獲取 {len(basic_news_list)} 篇新聞標題，準備進行關鍵字比對...", icon="🎯")
                     
-                    success_count = 0
-                    progress_text = st.empty()
-                    my_bar = st.progress(0)
-                    total_tasks = len(df_targets) * len(scraped_news)
-                    current_task = 0
+                    # 篩選命中的任務
+                    matched_tasks = []
+                    
+                    # 自動相容欄位名稱 (支援「搜尋關鍵字或判斷準則」或「關鍵字或判斷準則」)
+                    kw_col = '搜尋關鍵字或判斷準則' if '搜尋關鍵字或判斷準則' in df_targets.columns else '關鍵字或判斷準則'
                     
                     for _, target in df_targets.iterrows():
                         q_id = target.get('題號', '')
                         q_title = target.get('中文標題', '')
-                        q_desc = target.get('關鍵字或判斷準則', q_title)
+                        
+                        # 取得關鍵字字串，若空則拿標題當備用
+                        raw_kw = str(target.get(kw_col, ''))
+                        if not raw_kw.strip() or raw_kw.lower() == 'nan':
+                            raw_kw = q_title
+                            
+                        # 🌟 將字串依「、」或「,」切分為清單
+                        keywords = [k.strip() for k in re.split(r'[、,，]', raw_kw) if k.strip()]
+                        
                         if not q_id: continue
                         
-                        for news in scraped_news:
-                            current_task += 1
-                            progress_text.markdown(f"**🔍 AI 語意分析中：** 題目 {q_id} v.s. 新聞「{news['新聞標題']}」")
-                            my_bar.progress(current_task / total_tasks)
+                        for news in basic_news_list:
+                            is_match = False
+                            # 只要標題中包含任一個關鍵字就算命中
+                            for kw in keywords:
+                                if kw.lower() in news['新聞標題'].lower():
+                                    is_match = True
+                                    break
+                                    
+                            if is_match:
+                                matched_tasks.append({'q_id': q_id, 'q_title': q_title, 'q_desc': raw_kw, 'news': news})
+                    
+                    if not matched_tasks:
+                        st.warning("⚠️ 在此時間區間內，沒有任何新聞的【標題】符合您設定的關鍵字。")
+                    else:
+                        # 階段二：針對命中的新聞深入抓取並交給 AI
+                        success_count = 0
+                        total_tasks = len(matched_tasks)
+                        progress_text = st.empty()
+                        my_bar = st.progress(0)
+                        
+                        for i, task in enumerate(matched_tasks):
+                            q_id = task['q_id']
+                            news_title = task['news']['新聞標題']
                             
-                            ai_summary = process_news_with_ai(news, q_id, q_title, q_desc)
+                            progress_text.markdown(f"**🔍 ({i+1}/{total_tasks}) 命中！正在解析內文與 AI 摘要：** 題目 {q_id} v.s. 「{news_title}」")
+                            my_bar.progress((i + 1) / total_tasks)
+                            
+                            # 深入抓取內文與圖片
+                            detail = get_news_content(task['news']['新聞連結'])
+                            full_news = {**task['news'], **detail}
+                            
+                            # 呼叫 Gemini 進行摘要與 SDGs 標註
+                            ai_summary = process_news_with_ai(full_news, q_id, task['q_title'], task['q_desc'])
                             
                             if ai_summary: 
                                 record = {
-                                    '題號': q_id, '中文標題': q_title, '新聞日期': news['新聞日期'],
-                                    '新聞標題': news['新聞標題'], '原始內容': news['原始內容'],
-                                    'AI摘要': ai_summary, '照片清單': news['照片清單'], '新聞連結': news['新聞連結']
+                                    '題號': q_id, '中文標題': task['q_title'], '新聞日期': full_news['新聞日期'],
+                                    '新聞標題': full_news['新聞標題'], '原始內容': full_news['原始內容'],
+                                    'AI摘要': ai_summary, '照片清單': full_news['照片清單'], '新聞連結': full_news['新聞連結']
                                 }
                                 if save_to_ai_db(record):
                                     success_count += 1
                                     
-                    progress_text.empty()
-                    my_bar.empty()
-                    st.success(f"🎉 批次處理大功告成！AI 成功篩選並寫入了 {success_count} 筆符合的新聞摘要至資料庫！請至【檢視與下載區】查看。")
+                            time.sleep(1) # 友善延遲，避免 API 被鎖
+                                    
+                        progress_text.empty()
+                        my_bar.empty()
+                        st.success(f"🎉 批次處理大功告成！共命中 {total_tasks} 篇，AI 成功寫入 {success_count} 筆新聞摘要至資料庫！請至【檢視與下載區】查看。")
 
 # ==========================================
 # 🏷️ TAB 2: 檢視與下載彙整區
