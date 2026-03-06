@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import gspread
 import datetime
@@ -16,6 +17,26 @@ st.set_page_config(page_title="嘉大綠色大學翻譯校正", page_icon="🌍"
 # 初始化跳轉與進度記憶
 if 'jump_to_qid' not in st.session_state:
     st.session_state['jump_to_qid'] = None
+
+# 🌟 初始化「畫面置頂」觸發器
+if 'scroll_to_top' not in st.session_state:
+    st.session_state['scroll_to_top'] = False
+
+# 執行畫面置頂 JavaScript (當設定為 True 時觸發)
+if st.session_state['scroll_to_top']:
+    components.html(
+        """
+        <script>
+            // 尋找 Streamlit 的主要捲動容器並強制歸零
+            var main = window.parent.document.querySelector('.main');
+            if (main) main.scrollTop = 0;
+            var app = window.parent.document.querySelector('[data-testid="stAppViewContainer"]');
+            if (app) app.scrollTop = 0;
+        </script>
+        """,
+        height=0
+    )
+    st.session_state['scroll_to_top'] = False # 觸發後立刻關閉，避免重複執行
 
 # ==========================================
 # 🎨 系統 UI 樣式設定
@@ -136,7 +157,7 @@ if not df_q.empty:
 
     q_options.sort(key=lambda x: x.split(" ")[1])
 
-    # 🌟 智慧跳躍邏輯：在選單渲染前，若有指定的下一題，強制變更選單狀態
+    # 🌟 智慧跳躍邏輯
     if st.session_state.get('jump_to_qid'):
         target_qid = st.session_state['jump_to_qid']
         for opt in q_options:
@@ -148,7 +169,6 @@ if not df_q.empty:
     col_sel, col_stat = st.columns([3, 1])
     with col_sel:
         st.markdown("<div class='morandi-subtitle'>🔍 請選擇欲校正之題目</div>", unsafe_allow_html=True)
-        # 加入 key="q_selector"，讓 Streamlit 記住並受控於我們的跳躍邏輯
         selected_option = st.selectbox("", q_options, label_visibility="collapsed", key="q_selector")
     
     with col_stat:
@@ -196,7 +216,10 @@ if not df_q.empty:
                         st.session_state['last_saved_q'] = selected_q_id
                         st.session_state['last_saved_count'] = updated_count
                         
-                        # 🌟 成功後：尋找「下一題」
+                        # 🌟 啟動置頂開關
+                        st.session_state['scroll_to_top'] = True
+                        
+                        # 尋找「下一題」
                         current_idx = q_options.index(selected_option)
                         next_opt = None
                         
@@ -220,7 +243,6 @@ if not df_q.empty:
                             
                         st.rerun()
                     else:
-                        # 🌟 失敗後：不刷新頁面，維持現狀並跳出警示
                         st.error("⚠️ 資料尚未成功送出，請重新確認並點選送出！")
 
 # 顯示成功儲存的提示訊息
