@@ -213,7 +213,6 @@ def get_file_info(file_id, desc=""):
                 img = Image.open(io.BytesIO(file_bytes))
                 ratio = img.width / img.height
                 if ratio < 1.0: is_landscape = False
-                # 寬高比大於 1.9 判定為全景橫幅
                 if ratio >= 1.9: is_panorama = True 
             except Exception: pass
             
@@ -238,7 +237,7 @@ def write_to_database(unit, reporter, ext, email, q_id, q_title, report_text, fi
         return False
 
 # ==========================================
-# 🌟 智慧文字解析引擎：網頁完美公文縮排
+# 🌟 公文級文字解析引擎：網頁完美縮排對齊
 # ==========================================
 def format_report_text_to_html(text):
     text = str(text)
@@ -250,19 +249,17 @@ def format_report_text_to_html(text):
             html += "<div style='height: 10px;'></div>"
             continue
         
-        # 辨識 1. / 2、 / (1) / - / • 
         match = re.match(r'^([0-9a-zA-Z]+[\.、\)]|[\(（][0-9a-zA-Z一二三四五六七八九十]+[\)）]|[一二三四五六七八九十]+、|[-•*])\s*(.*)', line)
         if match: 
             marker = match.group(1)
             content = match.group(2)
-            # 🌟 完美懸掛縮排設定，序號前無多餘空白，後方自動對齊
-            html += f"<div style='padding-left: 2.2em; text-indent: -2.2em; margin-bottom: 5px; line-height: 1.6;'>{marker} {content}</div>"
+            html += f"<div style='display: flex; margin-bottom: 5px; line-height: 1.6;'><div style='width: 2.5em; flex-shrink: 0; text-align: right; padding-right: 0.5em;'>{marker}</div><div>{content}</div></div>"
         else: 
             html += f"<div style='margin-bottom: 5px; line-height: 1.6;'>{line}</div>"
     return html.replace('\n', ' ')
 
 # ==========================================
-# 🌟 Word 報告產製引擎 (公文級排版 + 實體 Enter 換行)
+# 🌟 Word 報告產製引擎 (公文級排版 + 全景圖支援)
 # ==========================================
 def set_run_font(run):
     run.font.name = 'Times New Roman'
@@ -278,7 +275,6 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
         
     doc.add_heading(f'{q_id} {q_title}', level=1)
     
-    # 🌟 實體 Enter 換行，避免左右對齊跑版
     doc.add_heading('題目說明：', level=2)
     for line in str(desc_text).replace('\r', '').split('\n'):
         if line.strip(): doc.add_paragraph(line.strip())
@@ -291,7 +287,6 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
     doc.add_heading('填報資訊 / 年度執行亮點成果：', level=2)
     report_text_clean = re.sub(r'(^|\n)(\d+[\.\)]|[-•*])\s*\n\s*', r'\1\2 ', str(report_text))
     
-    # 🌟 項目符號智慧懸掛縮排 (無 Tab 巨幅跳躍，精準控制)
     for line in report_text_clean.replace('\r', '').split('\n'):
         line = line.strip()
         if not line: continue
@@ -301,10 +296,9 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
         if match:
             marker = match.group(1)
             content = match.group(2)
-            # 左側縮排 0.8cm，首行凸排 0.8cm
-            p.paragraph_format.left_indent = Cm(0.8)
-            p.paragraph_format.first_line_indent = Cm(-0.8)
-            p.add_run(f"{marker} {content}")
+            p.paragraph_format.left_indent = Cm(1.0)
+            p.paragraph_format.first_line_indent = Cm(-1.0)
+            p.add_run(f"{marker}\t{content}")
         else:
             p.add_run(line)
     
@@ -315,12 +309,10 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
     portraits = [f for f in enriched_files if f.get('is_image') and not f.get('is_landscape')]
     other_docs = [f for f in enriched_files if not f.get('is_image')]
     
-    # 🌟 所有照片放入同一個表格
     if len(panoramas) > 0 or len(landscapes) > 0 or len(portraits) > 0:
         table = doc.add_table(rows=0, cols=2)
         table.style = 'Table Grid'
         
-        # 1. 處理全景圖 (跨欄合併)
         for pano in panoramas:
             row = table.add_row()
             cell = row.cells[0]
@@ -330,7 +322,7 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
             try:
                 img_bytes = base64.b64decode(pano['b64'])
                 fh = io.BytesIO(img_bytes)
-                inline = p_img.add_run().add_picture(fh, width=Cm(15.5)) # 全景寬度
+                inline = p_img.add_run().add_picture(fh, width=Cm(15.5))
                 try:
                     pic_xml = inline._inline.xpath('.//pic:pic')[0]
                     spPr = pic_xml.xpath('.//pic:spPr')[0]
@@ -340,8 +332,7 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
             except Exception: p_img.add_run("(圖片無法插入)")
             p_text = cell.add_paragraph(f"{pano['desc']}")
             p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        # 2. 處理一般配對照片
+        
         pairs = []
         for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
         rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
@@ -375,7 +366,6 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
                     p_text = cell.add_paragraph(f"{f['desc']}")
                     p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # 3. 處理文件 (無 ICON、實體 Enter 換行)
     if len(other_docs) > 0:
         for f in other_docs:
             p1 = doc.add_paragraph()
@@ -434,6 +424,9 @@ with tab_fill:
         unit_list = []
         for u in df_questions['權責單位'].dropna().unique():
             if str(u).strip() != '': unit_list.append(str(u).strip())
+            
+        # 🌟 繁體中文筆畫排序魔法 (利用 Big5 編碼順序)
+        unit_list = sorted(unit_list, key=lambda x: str(x).encode('big5', errors='ignore'))
         
         c_unit, c_item = st.columns(2)
         with c_unit:
@@ -586,7 +579,7 @@ with tab_fill:
                                 st.rerun()
 
 # ==========================================
-# 🏷️ TAB 2: 檢視填報成果 (回歸上下滿版配置)
+# 🏷️ TAB 2: 檢視填報成果
 # ==========================================
 with tab_view:
     df_reported = load_reported_data()
@@ -603,6 +596,9 @@ with tab_view:
         rep_units = []
         for u in df_reported['權責單位'].dropna().unique():
             if str(u).strip() != '': rep_units.append(str(u).strip())
+            
+        # 🌟 繁體中文筆畫排序魔法
+        rep_units = sorted(rep_units, key=lambda x: str(x).encode('big5', errors='ignore'))
         
         c_v_unit, c_v_item = st.columns(2)
         with c_v_unit:
@@ -636,7 +632,7 @@ with tab_view:
                 
                 st.markdown("---")
                 
-                # 🌟 填報人資訊：深灰色字體、放大一號
+                # 填報人資訊
                 v_reporter = latest_record.get('填報人', '無')
                 v_ext = latest_record.get('填報人分機', '無')
                 v_email = latest_record.get('填報人電子郵件', '無')
@@ -652,16 +648,10 @@ with tab_view:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # ==========================
-                # 填報資訊區 (取消分欄，改為上下滿版)
-                # ==========================
                 st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
                 formatted_report = format_report_text_to_html(latest_record.get('填報內容', '無'))
                 st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
                 
-                # ==========================
-                # 佐證照片或檔案區 (完美網格 + 不裁切)
-                # ==========================
                 st.markdown("<div class='morandi-dark-title'>📎 佐證照片或檔案</div>", unsafe_allow_html=True)
                 
                 raw_files = []
@@ -683,17 +673,16 @@ with tab_view:
                 if len(enriched_files) == 0:
                     st.info("此紀錄無上傳任何附件。")
                 else:
-                    # 🌟 透過 HTML Table 繪製完美網格，保證絕對對齊
+                    # 🌟 將所有照片放入同一個 HTML Table 中
                     table_html = "<table style='width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #D9E0E3; background-color:white; margin-bottom: 25px;'>"
                     
-                    # 1. 處理全景圖 (單獨佔一列不裁切)
                     for pano in panoramas:
                         table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
                     
-                    # 2. 處理一般配對照片
                     pairs = []
                     for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
                     rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
+                    
                     for i in range(0, len(portraits) - 1, 2): pairs.append((portraits[i], portraits[i+1]))
                     rem_p = portraits[-1] if len(portraits) % 2 != 0 else None
                     
@@ -705,7 +694,6 @@ with tab_view:
                         table_html += "<tr>"
                         for f in [p1, p2]:
                             if f:
-                                # 移除 cover，改為 contain 與自動高度，保證 100% 不裁切
                                 ratio = "7.5/5.5" if f['is_landscape'] else "7/9"
                                 table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; width:50%; vertical-align:top;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='aspect-ratio:{ratio}; width:100%; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
                             else:
@@ -714,11 +702,9 @@ with tab_view:
                     
                     table_html += "</table>"
                     
-                    # 如果有照片才顯示表格
                     if len(panoramas) > 0 or len(pairs) > 0:
                         st.markdown(table_html, unsafe_allow_html=True)
                     
-                    # 3. 處理其他文件
                     if len(other_docs) > 0:
                         for f in other_docs:
                             drive_link = f"https://drive.google.com/file/d/{f['id']}/view"
