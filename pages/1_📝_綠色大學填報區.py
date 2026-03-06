@@ -12,6 +12,7 @@ from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from docx import Document
 from docx.shared import Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL  # 🌟 新增：Word 垂直置中模組
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 
@@ -253,13 +254,13 @@ def format_report_text_to_html(text):
         if match: 
             marker = match.group(1)
             content = match.group(2)
-            html += f"<div style='display: flex; margin-bottom: 5px; line-height: 1.6;'><div style='width: 2.5em; flex-shrink: 0; text-align: right; padding-right: 0.5em;'>{marker}</div><div>{content}</div></div>"
+            html += f"<div style='padding-left: 2.2em; text-indent: -2.2em; margin-bottom: 5px; line-height: 1.6;'>{marker} {content}</div>"
         else: 
             html += f"<div style='margin-bottom: 5px; line-height: 1.6;'>{line}</div>"
     return html.replace('\n', ' ')
 
 # ==========================================
-# 🌟 Word 報告產製引擎 (公文級排版 + 全景圖支援)
+# 🌟 Word 報告產製引擎 (公文級排版 + 垂直置中 + 全景圖支援)
 # ==========================================
 def set_run_font(run):
     run.font.name = 'Times New Roman'
@@ -296,9 +297,9 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
         if match:
             marker = match.group(1)
             content = match.group(2)
-            p.paragraph_format.left_indent = Cm(1.0)
-            p.paragraph_format.first_line_indent = Cm(-1.0)
-            p.add_run(f"{marker}\t{content}")
+            p.paragraph_format.left_indent = Cm(0.8)
+            p.paragraph_format.first_line_indent = Cm(-0.8)
+            p.add_run(f"{marker} {content}")
         else:
             p.add_run(line)
     
@@ -313,16 +314,19 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
         table = doc.add_table(rows=0, cols=2)
         table.style = 'Table Grid'
         
+        # 1. 處理全景圖
         for pano in panoramas:
             row = table.add_row()
             cell = row.cells[0]
             cell.merge(row.cells[1])
+            # 🌟 設定儲存格垂直置中
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             p_img = cell.paragraphs[0]
             p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
             try:
                 img_bytes = base64.b64decode(pano['b64'])
                 fh = io.BytesIO(img_bytes)
-                inline = p_img.add_run().add_picture(fh, width=Cm(15.5))
+                inline = p_img.add_run().add_picture(fh, width=Cm(15.5)) 
                 try:
                     pic_xml = inline._inline.xpath('.//pic:pic')[0]
                     spPr = pic_xml.xpath('.//pic:spPr')[0]
@@ -332,7 +336,8 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
             except Exception: p_img.add_run("(圖片無法插入)")
             p_text = cell.add_paragraph(f"{pano['desc']}")
             p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+
+        # 2. 處理一般配對照片
         pairs = []
         for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
         rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
@@ -348,6 +353,8 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
             row = table.add_row()
             for idx, f in enumerate([p1, p2]):
                 cell = row.cells[idx]
+                # 🌟 設定儲存格垂直置中
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 if f:
                     p_img = cell.paragraphs[0]
                     p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -374,7 +381,7 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
             p2 = doc.add_paragraph()
             p2.add_run(f"請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
             
-    if len(panoramas) == 0 and len(landscapes) == 0 and len(portraits) == 0 and len(other_docs) == 0: 
+    if len(panoramas) == 0 and len(pairs) == 0 and len(other_docs) == 0: 
         doc.add_paragraph("此紀錄無上傳任何附件。")
     
     for p in doc.paragraphs:
@@ -425,7 +432,7 @@ with tab_fill:
         for u in df_questions['權責單位'].dropna().unique():
             if str(u).strip() != '': unit_list.append(str(u).strip())
             
-        # 🌟 繁體中文筆畫排序魔法 (利用 Big5 編碼順序)
+        # 🌟 繁體中文筆畫排序魔法
         unit_list = sorted(unit_list, key=lambda x: str(x).encode('big5', errors='ignore'))
         
         c_unit, c_item = st.columns(2)
@@ -632,7 +639,6 @@ with tab_view:
                 
                 st.markdown("---")
                 
-                # 填報人資訊
                 v_reporter = latest_record.get('填報人', '無')
                 v_ext = latest_record.get('填報人分機', '無')
                 v_email = latest_record.get('填報人電子郵件', '無')
@@ -673,11 +679,11 @@ with tab_view:
                 if len(enriched_files) == 0:
                     st.info("此紀錄無上傳任何附件。")
                 else:
-                    # 🌟 將所有照片放入同一個 HTML Table 中
+                    # 🌟 將所有照片放入 HTML Table，並設定垂直置中 (vertical-align: middle)
                     table_html = "<table style='width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #D9E0E3; background-color:white; margin-bottom: 25px;'>"
                     
                     for pano in panoramas:
-                        table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
+                        table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:middle;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
                     
                     pairs = []
                     for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
@@ -695,9 +701,10 @@ with tab_view:
                         for f in [p1, p2]:
                             if f:
                                 ratio = "7.5/5.5" if f['is_landscape'] else "7/9"
-                                table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; width:50%; vertical-align:top;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='aspect-ratio:{ratio}; width:100%; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
+                                # 🌟 加入 vertical-align: middle; 讓照片完美垂直置中
+                                table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; width:50%; vertical-align:middle;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='aspect-ratio:{ratio}; width:100%; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
                             else:
-                                table_html += "<td style='border:1px solid #D9E0E3; width:50%;'></td>"
+                                table_html += "<td style='border:1px solid #D9E0E3; width:50%; vertical-align:middle;'></td>"
                         table_html += "</tr>"
                     
                     table_html += "</table>"
