@@ -221,6 +221,7 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
             landscapes = [f for f in images if f.get('is_landscape') and not f.get('is_panorama')]
             portraits = [f for f in images if not f.get('is_landscape')]
             
+            # 1. 處理全景圖
             for pano in panoramas:
                 row = table.add_row()
                 cell = row.cells[0]
@@ -238,6 +239,7 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
                 except: p_img.add_run("(圖片無法插入)")
                 cell.add_paragraph(f"{pano['desc']}").alignment = WD_ALIGN_PARAGRAPH.CENTER
             
+            # 2. 處理配對照片
             pairs = []
             for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
             rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
@@ -267,6 +269,7 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
                         except: p_img.add_run("(圖片無法插入)")
                         cell.add_paragraph(f"{f['desc']}").alignment = WD_ALIGN_PARAGRAPH.CENTER
     
+    # 處理文件
     has_any_doc = any(not f.get('is_image') for files in unit_enriched_files.values() for f in files)
     
     if has_any_doc:
@@ -316,7 +319,7 @@ with col_btn:
 tab_missing, tab_download = st.tabs(["🎯 追蹤未申報單位", "📥 下載彙整資料"])
 
 # ==========================================
-# 🏷️ TAB 1: 追蹤未申報單位 (斑馬紋修復版)
+# 🏷️ TAB 1: 追蹤未申報單位 (高對比斑馬紋)
 # ==========================================
 with tab_missing:
     with st.spinner("⏳ 正在比對資料庫，找出未申報名單..."):
@@ -350,20 +353,26 @@ with tab_missing:
                 st.info(f"💡 目前共有 **{len(missing)}** 筆待填報項目。")
                 grouped_missing = missing.groupby('權責單位')
                 
-                # 🌟 改用 HTML 原生標籤生成，徹底解決 Streamlit CSS 單雙數失效的問題！
+                # 🌟 高對比斑馬紋 UI 渲染
                 html_str = ""
                 count = 0
                 for unit, group in grouped_missing:
-                    # 交錯底色邏輯 (調淡2階的莫蘭迪藍)
-                    bg_summary = "#D6E4EB" if count % 2 == 0 else "#EAF0F4"
-                    bg_content = "#F2F6F8" if count % 2 == 0 else "#F9FBFC"
-                    
+                    # 拉大對比的交錯底色邏輯
+                    if count % 2 == 0:
+                        bg_summary = "#9CB4C4"  # 較深的莫蘭迪藍
+                        bg_content = "#E8EEF2"  # 對應微深底色
+                        border_color = "#9CB4C4"
+                    else:
+                        bg_summary = "#D0DCE3"  # 較淺的冰藍色
+                        bg_content = "#F7F9FA"  # 對應極淺底色
+                        border_color = "#D0DCE3"
+                        
                     html_str += f'''
-                    <details style="margin-bottom: 12px; border: 1px solid #B0C4DE; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+                    <details style="margin-bottom: 12px; border: 1px solid {border_color}; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
                         <summary style="background-color: {bg_summary}; color: black; padding: 15px 20px; font-size: 1.25em; font-weight: bold; border-radius: 8px; cursor: pointer;">
-                            🏢 {unit} <span style="color: #E74C3C; font-size: 0.9em;">(尚缺 {len(group)} 題)</span>
+                            🏢 {unit} <span style="color: #C0392B; font-size: 0.9em;">(尚缺 {len(group)} 題)</span>
                         </summary>
-                        <div style="background-color: {bg_content}; padding: 20px; color: black; border-radius: 0 0 8px 8px; border-top: 1px solid #B0C4DE;">
+                        <div style="background-color: {bg_content}; padding: 20px; color: black; border-radius: 0 0 8px 8px; border-top: 1px solid {border_color};">
                             <ul style="margin: 0; padding-left: 25px; line-height: 1.8; font-size: 1.15em;">
                     '''
                     for idx, row in group.iterrows():
@@ -506,6 +515,7 @@ with tab_download:
                     portraits = [f for f in images if not f.get('is_landscape')]
                     
                     for pano in panoramas:
+                        # 全景圖垂直置中
                         table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:middle;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
                     
                     pairs = []
