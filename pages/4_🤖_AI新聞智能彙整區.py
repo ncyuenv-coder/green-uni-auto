@@ -7,6 +7,7 @@ import requests
 import re
 import base64
 import time
+import urllib3
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 from google.oauth2.credentials import Credentials
@@ -16,6 +17,9 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
+
+# 🌟 關閉 SSL 憑證驗證警告，讓系統保持清爽
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
 # 🌟 全域設定 & 資安防護罩
@@ -75,7 +79,7 @@ def save_to_ai_db(record):
         return False
 
 # ==========================================
-# 🕷️ 智慧深潛版：嘉大新聞網頁爬蟲 (無限翻頁直到日期過期)
+# 🕷️ 智慧深潛版：嘉大新聞網頁爬蟲 (突破 SSL 防護版)
 # ==========================================
 def scrape_ncyu_news(start_date, end_date):
     base_url = "https://www.ncyu.edu.tw"
@@ -86,13 +90,13 @@ def scrape_ncyu_news(start_date, end_date):
     page = 1
     stop_scraping = False
     
-    # 🌟 設定防呆最大頁數，但主要依靠「日期判斷」來停止
     while page <= 40 and not stop_scraping:
         list_url = f"{base_url}/ncyu/Subject?nodeId=835&page={page}"
         st.toast(f"📄 正在掃描第 {page} 頁新聞...", icon="👀")
         
         try:
-            req = requests.get(list_url, headers=headers, timeout=10)
+            # 🌟 加上 verify=False 繞過 SSL 憑證錯誤
+            req = requests.get(list_url, headers=headers, timeout=10, verify=False)
             req.encoding = 'utf-8'
             soup = BeautifulSoup(req.text, 'html.parser')
             
@@ -101,7 +105,6 @@ def scrape_ncyu_news(start_date, end_date):
             
             for a in links:
                 href = a['href']
-                # 確認是新聞內文連結
                 if 'Subject?nodeId=835&id=' in href:
                     has_news_in_page = True
                     full_link = base_url + "/ncyu/" + href if not href.startswith('http') else href
@@ -109,7 +112,6 @@ def scrape_ncyu_news(start_date, end_date):
                     if full_link in seen_links: continue
                     seen_links.add(full_link)
                     
-                    # 抓取日期
                     parent_text = a.parent.parent.text
                     date_match = re.search(r'20\d{2}[-/.]\d{2}[-/.]\d{2}', parent_text)
                     
@@ -117,18 +119,17 @@ def scrape_ncyu_news(start_date, end_date):
                         date_str = date_match.group().replace('/', '-').replace('.', '-')
                         news_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
                         
-                        # 🌟 關鍵邏輯：如果看到的新聞已經比「起日」還要舊，代表後面的全部不用看了，直接停機！
                         if news_date < start_date:
                             stop_scraping = True
                             break
                         
-                        # 如果在這個區間內，就進去抓內文
                         if start_date <= news_date <= end_date:
                             title = a.get('title', '').strip() or a.text.strip()
                             title = re.sub(r'\s+', ' ', title) 
                             
                             try:
-                                d_req = requests.get(full_link, headers=headers, timeout=10)
+                                # 🌟 進入內文同樣加上 verify=False
+                                d_req = requests.get(full_link, headers=headers, timeout=10, verify=False)
                                 d_req.encoding = 'utf-8'
                                 d_soup = BeautifulSoup(d_req.text, 'html.parser')
                                 
@@ -154,10 +155,10 @@ def scrape_ncyu_news(start_date, end_date):
                                 })
                                 time.sleep(0.3) 
                             except Exception as e:
-                                pass # 內文抓取失敗略過
+                                pass 
             
             if not has_news_in_page:
-                break # 這頁連一個新聞連結都沒有，網頁到底了
+                break 
                 
         except Exception as e:
             st.warning(f"第 {page} 頁抓取失敗: {e}")
@@ -172,7 +173,6 @@ def scrape_ncyu_news(start_date, end_date):
 # 🧠 Gemini AI 判斷與生成引擎 (語意理解)
 # ==========================================
 def process_news_with_ai(news_item, q_id, q_title, q_desc):
-    # 🌟 這裡就是賦予 AI 語意判斷的核心 Prompt
     prompt = f"""
     你現在是大學永續發展(SDGs)評比的資深專家。
     請根據以下【新聞內容】，以「語意理解」的方式判斷該新聞的實質內容是否符合評比題目『{q_title}』的範疇。
@@ -194,7 +194,7 @@ def process_news_with_ai(news_item, q_id, q_title, q_desc):
         ai_result = response.text.strip()
         
         if "不符合此題" in ai_result:
-            return None # 丟棄此新聞
+            return None 
         return ai_result
     except Exception as e:
         return f"AI 處理失敗：{e}"
@@ -204,7 +204,8 @@ def process_news_with_ai(news_item, q_id, q_title, q_desc):
 # ==========================================
 def url_to_bytes(url):
     try:
-        req = requests.get(url, timeout=5)
+        # 🌟 轉換圖片 URL 時，同樣略過 SSL 驗證
+        req = requests.get(url, timeout=5, verify=False)
         req.raise_for_status()
         return io.BytesIO(req.content)
     except: return None
@@ -316,7 +317,6 @@ with tab_ai:
             if df_targets.empty:
                 st.error("❌ 找不到《原始新聞抓取》工作表，或表內無資料！")
             else:
-                # 執行智慧深潛爬蟲
                 scraped_news = scrape_ncyu_news(start_date, end_date)
                 
                 if not scraped_news:
@@ -325,14 +325,11 @@ with tab_ai:
                     st.toast(f"✅ 成功抓取 {len(scraped_news)} 篇在區間內的新聞，準備交給 AI 逐題判斷...", icon="🧠")
                     
                     success_count = 0
-                    
-                    # 顯示即時進度條
                     progress_text = st.empty()
                     my_bar = st.progress(0)
                     total_tasks = len(df_targets) * len(scraped_news)
                     current_task = 0
                     
-                    # 巢狀迴圈：每一題去對比每一篇新聞
                     for _, target in df_targets.iterrows():
                         q_id = target.get('題號', '')
                         q_title = target.get('中文標題', '')
@@ -344,10 +341,9 @@ with tab_ai:
                             progress_text.markdown(f"**🔍 AI 語意分析中：** 題目 {q_id} v.s. 新聞「{news['新聞標題']}」")
                             my_bar.progress(current_task / total_tasks)
                             
-                            # 呼叫 Gemini 判斷 (使用語意判斷，非精準字眼對比)
                             ai_summary = process_news_with_ai(news, q_id, q_title, q_desc)
                             
-                            if ai_summary: # AI 判定符合精神
+                            if ai_summary: 
                                 record = {
                                     '題號': q_id, '中文標題': q_title, '新聞日期': news['新聞日期'],
                                     '新聞標題': news['新聞標題'], '原始內容': news['原始內容'],
