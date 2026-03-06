@@ -26,61 +26,27 @@ if st.session_state.get("authentication_status") is not True:
 st.set_page_config(page_title="嘉大綠色大學填報管理區", page_icon="📊", layout="wide")
 
 # ==========================================
-# 🎨 系統 UI 樣式設定 (包含斑馬紋交錯底色與黑字設定)
+# 🎨 系統 UI 樣式設定
 # ==========================================
 st.markdown("""
 <style>
     /* 標籤頁 (Tabs) 樣式 */
     button[data-baseweb="tab"] { 
-        background-color: #E6F0F9 !important; 
-        border-radius: 8px 8px 0px 0px !important; 
-        margin-right: 4px !important; 
-        padding: 10px 20px !important; 
-        border: 1px solid #AED6F1 !important; 
-        border-bottom: none !important; 
-        transition: all 0.3s ease; 
+        background-color: #E6F0F9 !important; border-radius: 8px 8px 0px 0px !important; 
+        margin-right: 4px !important; padding: 10px 20px !important; 
+        border: 1px solid #AED6F1 !important; border-bottom: none !important; transition: all 0.3s ease; 
     }
-    button[data-baseweb="tab"] p { 
-        font-size: 1.4em !important; 
-        font-weight: bold !important; 
-        color: #2C3E50 !important; 
-    }
+    button[data-baseweb="tab"] p { font-size: 1.4em !important; font-weight: bold !important; color: #2C3E50 !important; }
     button[data-baseweb="tab"][aria-selected="true"] { 
-        background-color: #154360 !important; 
-        border: 1px solid #0B2331 !important; 
-        border-bottom: 3px solid #0B2331 !important; 
+        background-color: #154360 !important; border: 1px solid #0B2331 !important; border-bottom: 3px solid #0B2331 !important; 
     }
-    button[data-baseweb="tab"][aria-selected="true"] p { 
-        color: #FFFFFF !important; 
-    }
+    button[data-baseweb="tab"][aria-selected="true"] p { color: #FFFFFF !important; }
 
     /* 各區塊標題 */
     .morandi-select-title { background-color: #9DAB86; color: white; padding: 12px 15px; border-radius: 6px; font-weight: bold; font-size: 1.2em; margin-bottom: 5px; margin-top: 15px; }
     .morandi-question-title { background-color: #948B89; color: white; padding: 15px 18px; border-radius: 6px; font-weight: bold; font-size: 1.4em; margin-bottom: 15px; margin-top: 10px; }
     .morandi-dark-title { background-color: #5C6B73; color: white; padding: 12px 20px; border-radius: 6px; font-weight: bold; font-size: 1.3em; margin-bottom: 10px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     .light-brown-box { background-color: #F5EBE0; color: #2C3E50; padding: 15px 20px; border-left: 6px solid #D4A373; border-radius: 6px; margin-bottom: 5px; line-height: 1.6; }
-    
-    /* 🌟 TAB 1：折疊面板標題區 (交錯底色) */
-    div[data-testid="stExpander"]:nth-of-type(odd) details summary { background-color: #738A96 !important; color: white !important; border-radius: 6px; }
-    div[data-testid="stExpander"]:nth-of-type(even) details summary { background-color: #8FAAB8 !important; color: white !important; border-radius: 6px; }
-    div[data-testid="stExpander"] details summary p { font-size: 1.2em !important; font-weight: bold; color: white !important; }
-    div[data-testid="stExpander"] details summary svg { fill: white !important; }
-    
-    /* 🌟 TAB 1：展開內容區 (交錯底色 + 純黑字體) */
-    div[data-testid="stExpander"]:nth-of-type(odd) details[open] > div:nth-child(2) { 
-        background-color: #E4EBEE !important; /* 較深標題的淡化版 */
-        border: 2px solid #738A96; border-top: none; border-radius: 0 0 6px 6px; padding: 15px; 
-    }
-    div[data-testid="stExpander"]:nth-of-type(even) details[open] > div:nth-child(2) { 
-        background-color: #F2F6F8 !important; /* 較淺標題的淡化版 */
-        border: 2px solid #8FAAB8; border-top: none; border-radius: 0 0 6px 6px; padding: 15px; 
-    }
-    div[data-testid="stExpander"] details[open] > div:nth-child(2) p,
-    div[data-testid="stExpander"] details[open] > div:nth-child(2) li { 
-        font-size: 1.15em !important; line-height: 1.6; 
-        color: #000000 !important; /* 強制設定為黑色 */
-        font-weight: 500;
-    }
     
     /* 下載按鈕 */
     div.stButton > button[kind="primary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.4em !important; padding: 12px 30px !important; }
@@ -157,7 +123,7 @@ def get_file_info(file_id, desc=""):
         return None
 
 # ==========================================
-# 🌟 公文級文字解析引擎：網頁完美縮排對齊 (支援跨單位綜整)
+# 🌟 公文級文字解析引擎：網頁完美縮排對齊
 # ==========================================
 def format_report_text_to_html(text):
     text = str(text)
@@ -246,7 +212,6 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
                 row = table.add_row()
                 cell = row.cells[0]
                 cell.merge(row.cells[1])
-                # 🌟 加入垂直置中設定
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 p = cell.paragraphs[0]
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -256,7 +221,6 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
             landscapes = [f for f in images if f.get('is_landscape') and not f.get('is_panorama')]
             portraits = [f for f in images if not f.get('is_landscape')]
             
-            # 1. 處理全景圖
             for pano in panoramas:
                 row = table.add_row()
                 cell = row.cells[0]
@@ -274,7 +238,6 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
                 except: p_img.add_run("(圖片無法插入)")
                 cell.add_paragraph(f"{pano['desc']}").alignment = WD_ALIGN_PARAGRAPH.CENTER
             
-            # 2. 處理配對照片
             pairs = []
             for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
             rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
@@ -290,7 +253,6 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
                 row = table.add_row()
                 for idx, f in enumerate([p1, p2]):
                     cell = row.cells[idx]
-                    # 🌟 將每一格都設定為垂直置中
                     cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     if f:
                         p_img = cell.paragraphs[0]
@@ -305,7 +267,6 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
                         except: p_img.add_run("(圖片無法插入)")
                         cell.add_paragraph(f"{f['desc']}").alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # 處理文件
     has_any_doc = any(not f.get('is_image') for files in unit_enriched_files.values() for f in files)
     
     if has_any_doc:
@@ -355,7 +316,7 @@ with col_btn:
 tab_missing, tab_download = st.tabs(["🎯 追蹤未申報單位", "📥 下載彙整資料"])
 
 # ==========================================
-# 🏷️ TAB 1: 追蹤未申報單位
+# 🏷️ TAB 1: 追蹤未申報單位 (斑馬紋修復版)
 # ==========================================
 with tab_missing:
     with st.spinner("⏳ 正在比對資料庫，找出未申報名單..."):
@@ -388,10 +349,29 @@ with tab_missing:
             else:
                 st.info(f"💡 目前共有 **{len(missing)}** 筆待填報項目。")
                 grouped_missing = missing.groupby('權責單位')
+                
+                # 🌟 改用 HTML 原生標籤生成，徹底解決 Streamlit CSS 單雙數失效的問題！
+                html_str = ""
+                count = 0
                 for unit, group in grouped_missing:
-                    with st.expander(f"🏢 {unit} (尚缺 {len(group)} 題)", expanded=False):
-                        for idx, row in group.iterrows():
-                            st.markdown(f"- **{row['當年度題目']}**：{row['中文標題']}")
+                    # 交錯底色邏輯 (調淡2階的莫蘭迪藍)
+                    bg_summary = "#D6E4EB" if count % 2 == 0 else "#EAF0F4"
+                    bg_content = "#F2F6F8" if count % 2 == 0 else "#F9FBFC"
+                    
+                    html_str += f'''
+                    <details style="margin-bottom: 12px; border: 1px solid #B0C4DE; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+                        <summary style="background-color: {bg_summary}; color: black; padding: 15px 20px; font-size: 1.25em; font-weight: bold; border-radius: 8px; cursor: pointer;">
+                            🏢 {unit} <span style="color: #E74C3C; font-size: 0.9em;">(尚缺 {len(group)} 題)</span>
+                        </summary>
+                        <div style="background-color: {bg_content}; padding: 20px; color: black; border-radius: 0 0 8px 8px; border-top: 1px solid #B0C4DE;">
+                            <ul style="margin: 0; padding-left: 25px; line-height: 1.8; font-size: 1.15em;">
+                    '''
+                    for idx, row in group.iterrows():
+                        html_str += f"<li style='margin-bottom: 8px;'><b>{row['當年度題目']}</b>：{row['中文標題']}</li>"
+                    html_str += "</ul></div></details>"
+                    count += 1
+                    
+                st.markdown(html_str, unsafe_allow_html=True)
 
 # ==========================================
 # 🏷️ TAB 2: 下載彙整資料 (跨單位完美合併版)
@@ -526,7 +506,6 @@ with tab_download:
                     portraits = [f for f in images if not f.get('is_landscape')]
                     
                     for pano in panoramas:
-                        # 🌟 全景圖垂直置中
                         table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:middle;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
                     
                     pairs = []
