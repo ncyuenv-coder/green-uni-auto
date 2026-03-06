@@ -12,6 +12,7 @@ from googleapiclient.http import MediaIoBaseDownload
 from docx import Document
 from docx.shared import Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 
@@ -25,7 +26,7 @@ if st.session_state.get("authentication_status") is not True:
 st.set_page_config(page_title="嘉大綠色大學填報管理區", page_icon="📊", layout="wide")
 
 # ==========================================
-# 🎨 系統 UI 樣式設定
+# 🎨 系統 UI 樣式設定 (包含斑馬紋交錯底色與黑字設定)
 # ==========================================
 st.markdown("""
 <style>
@@ -59,16 +60,27 @@ st.markdown("""
     .morandi-dark-title { background-color: #5C6B73; color: white; padding: 12px 20px; border-radius: 6px; font-weight: bold; font-size: 1.3em; margin-bottom: 10px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     .light-brown-box { background-color: #F5EBE0; color: #2C3E50; padding: 15px 20px; border-left: 6px solid #D4A373; border-radius: 6px; margin-bottom: 5px; line-height: 1.6; }
     
-    /* 🌟 TAB 1：折疊面板交錯底色與字體放大 */
+    /* 🌟 TAB 1：折疊面板標題區 (交錯底色) */
     div[data-testid="stExpander"]:nth-of-type(odd) details summary { background-color: #738A96 !important; color: white !important; border-radius: 6px; }
     div[data-testid="stExpander"]:nth-of-type(even) details summary { background-color: #8FAAB8 !important; color: white !important; border-radius: 6px; }
     div[data-testid="stExpander"] details summary p { font-size: 1.2em !important; font-weight: bold; color: white !important; }
     div[data-testid="stExpander"] details summary svg { fill: white !important; }
     
-    /* 展開內容區底色與字體放大 */
-    div[data-testid="stExpander"] details[open] > div:nth-child(2) { background-color: #F4F6F7 !important; border: 2px solid #738A96; border-top: none; border-radius: 0 0 6px 6px; padding: 15px; }
-    div[data-testid="stExpander"] details[open] > div:nth-child(2) div[data-testid="stMarkdownContainer"] p { font-size: 1.15em !important; line-height: 1.6; color: #2C3E50; }
-    div[data-testid="stExpander"] details[open] > div:nth-child(2) div[data-testid="stMarkdownContainer"] li { font-size: 1.15em !important; line-height: 1.6; color: #2C3E50; }
+    /* 🌟 TAB 1：展開內容區 (交錯底色 + 純黑字體) */
+    div[data-testid="stExpander"]:nth-of-type(odd) details[open] > div:nth-child(2) { 
+        background-color: #E4EBEE !important; /* 較深標題的淡化版 */
+        border: 2px solid #738A96; border-top: none; border-radius: 0 0 6px 6px; padding: 15px; 
+    }
+    div[data-testid="stExpander"]:nth-of-type(even) details[open] > div:nth-child(2) { 
+        background-color: #F2F6F8 !important; /* 較淺標題的淡化版 */
+        border: 2px solid #8FAAB8; border-top: none; border-radius: 0 0 6px 6px; padding: 15px; 
+    }
+    div[data-testid="stExpander"] details[open] > div:nth-child(2) p,
+    div[data-testid="stExpander"] details[open] > div:nth-child(2) li { 
+        font-size: 1.15em !important; line-height: 1.6; 
+        color: #000000 !important; /* 強制設定為黑色 */
+        font-weight: 500;
+    }
     
     /* 下載按鈕 */
     div.stButton > button[kind="primary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.4em !important; padding: 12px 30px !important; }
@@ -157,7 +169,6 @@ def format_report_text_to_html(text):
             html += "<div style='height: 10px;'></div>"
             continue
         
-        # 偵測跨單位的綜整標籤 【單位名稱】
         if re.match(r'^【.*】$', line):
             html += f"<div style='font-size: 1.15em; font-weight: bold; color: #154360; margin-top: 15px; margin-bottom: 5px; border-bottom: 2px solid #AED6F1; padding-bottom: 3px;'>{line}</div>"
             continue
@@ -172,7 +183,7 @@ def format_report_text_to_html(text):
     return html.replace('\n', ' ')
 
 # ==========================================
-# 🌟 Word 報告產製引擎 (公文排版 + 跨單位合併表格)
+# 🌟 Word 報告產製引擎 (垂直置中 + 公文排版 + 跨單位合併表格)
 # ==========================================
 def set_run_font(run):
     run.font.name = 'Times New Roman'
@@ -182,14 +193,12 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
     doc = Document()
     doc.add_heading(f'嘉大綠色大學填報成果彙整', 0)
     
-    # 填寫單位與人員資訊區 (支援複數列出)
     for info in info_strings:
         p_info = doc.add_paragraph(info)
         p_info.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         
     doc.add_heading(f'{q_id} {q_title}', level=1)
     
-    # 題目說明與資料需求 (實體 Enter 換行)
     doc.add_heading('題目說明：', level=2)
     for line in str(desc_text).replace('\r', '').split('\n'):
         if line.strip(): doc.add_paragraph(line.strip())
@@ -199,7 +208,6 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
     for line in clean_req.replace('\r', '').split('\n'):
         if line.strip(): doc.add_paragraph(line.strip())
     
-    # 填報資訊 (懸掛縮排)
     doc.add_heading('填報資訊 / 年度執行亮點成果：', level=2)
     report_text_clean = re.sub(r'(^|\n)(\d+[\.\)]|[-•*])\s*\n\s*', r'\1\2 ', str(report_text))
     
@@ -222,9 +230,6 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
         else:
             p.add_run(line)
     
-    # ==========================================
-    # 🌟 佐證照片表格 (跨單位整併在同一表格)
-    # ==========================================
     doc.add_heading('佐證照片/檔案：', level=2)
     
     has_any_image = any(f.get('is_image') for files in unit_enriched_files.values() for f in files)
@@ -237,11 +242,12 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
             images = [f for f in files if f.get('is_image')]
             if not images: continue
             
-            # 🌟 跨欄置中加入單位名稱
             if len(unit_enriched_files) > 1:
                 row = table.add_row()
                 cell = row.cells[0]
                 cell.merge(row.cells[1])
+                # 🌟 加入垂直置中設定
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 p = cell.paragraphs[0]
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p.add_run(f"【{u}】").bold = True
@@ -255,6 +261,7 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
                 row = table.add_row()
                 cell = row.cells[0]
                 cell.merge(row.cells[1])
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 p_img = cell.paragraphs[0]
                 p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 try:
@@ -283,6 +290,8 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
                 row = table.add_row()
                 for idx, f in enumerate([p1, p2]):
                     cell = row.cells[idx]
+                    # 🌟 將每一格都設定為垂直置中
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     if f:
                         p_img = cell.paragraphs[0]
                         p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -296,9 +305,7 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
                         except: p_img.add_run("(圖片無法插入)")
                         cell.add_paragraph(f"{f['desc']}").alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # ==========================================
-    # 處理文件 (置於表格下方，無 ICON)
-    # ==========================================
+    # 處理文件
     has_any_doc = any(not f.get('is_image') for files in unit_enriched_files.values() for f in files)
     
     if has_any_doc:
@@ -318,7 +325,6 @@ def generate_word_report(q_id, q_title, info_strings, desc_text, req_text, repor
     if not has_any_image and not has_any_doc:
         doc.add_paragraph("此紀錄無上傳任何附件。")
     
-    # 統一左右對齊與字體
     for p in doc.paragraphs:
         if not p.style.name.startswith('Heading'): p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         for r in p.runs: set_run_font(r)
@@ -442,7 +448,6 @@ with tab_download:
                 
                 info_strings.append(f"填報單位：{u}  |  👤 填報人：{rep}  |  📞 分機：{ext}  |  📧 Email：{em}")
                 
-                # 🌟 精準對應各單位的資料需求
                 q_match_unit = df_q_clean[(df_q_clean['當年度題目'] == v_q_id) & (df_q_clean['權責單位'] == u)]
                 if q_match_unit.empty:
                     q_match_unit = q_match_base
@@ -460,7 +465,7 @@ with tab_download:
                 for i in range(1, 11):
                     fid = str(row.get(f'檔案{i}_ID', '')).strip()
                     desc = str(row.get(f'檔案{i}_說明', '')).strip()
-                    if fid: files_for_u.append({'id': fid, 'desc': desc}) # 已移除強制加上的 [單位] 標籤
+                    if fid: files_for_u.append({'id': fid, 'desc': desc})
                 unit_files_dict[u] = files_for_u
             
             combined_reqs = combined_reqs.strip()
@@ -488,7 +493,7 @@ with tab_download:
             st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
             
             # ==========================================
-            # 🌟 網頁照片/檔案區 (跨單位完美合併表格)
+            # 🌟 網頁照片/檔案區 (垂直置中排版)
             # ==========================================
             st.markdown("<div class='morandi-dark-title'>📎 佐證照片或檔案</div>", unsafe_allow_html=True)
             
@@ -505,7 +510,6 @@ with tab_download:
             if not has_any_files:
                 st.info("此紀錄無上傳任何附件。")
             else:
-                # 生成單一 HTML Table 容納所有照片
                 table_html = "<table style='width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #D9E0E3; background-color:white; margin-bottom: 25px;'>"
                 has_image_table = False
                 
@@ -514,7 +518,6 @@ with tab_download:
                     if not images: continue
                     has_image_table = True
                     
-                    # 跨單位時，新增跨欄置中標題列
                     if unit_count > 1:
                         table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:10px; text-align:center; background-color:#E6F0F9;'><strong style='font-size:1.2em; color:#154360;'>【{u}】</strong></td></tr>"
                     
@@ -522,11 +525,10 @@ with tab_download:
                     landscapes = [f for f in images if f.get('is_landscape') and not f.get('is_panorama')]
                     portraits = [f for f in images if not f.get('is_landscape')]
                     
-                    # 處理全景圖
                     for pano in panoramas:
-                        table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
+                        # 🌟 全景圖垂直置中
+                        table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:middle;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
                     
-                    # 處理配對照片
                     pairs = []
                     for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
                     rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
@@ -542,7 +544,8 @@ with tab_download:
                         for f in [p1, p2]:
                             if f:
                                 ratio = "7.5/5.5" if f['is_landscape'] else "7/9"
-                                table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; width:50%; vertical-align:top;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='aspect-ratio:{ratio}; width:100%; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
+                                # 🌟 配對圖片垂直置中 (vertical-align: middle)
+                                table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; width:50%; vertical-align:middle;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='aspect-ratio:{ratio}; width:100%; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
                             else:
                                 table_html += "<td style='border:1px solid #D9E0E3; width:50%;'></td>"
                         table_html += "</tr>"
@@ -552,7 +555,6 @@ with tab_download:
                 if has_image_table:
                     st.markdown(table_html, unsafe_allow_html=True)
                 
-                # 處理其他文件 (非圖片類)
                 for u, files in unit_enriched_files.items():
                     docs = [f for f in files if not f.get('is_image')]
                     if docs:
