@@ -13,6 +13,7 @@ from docx import Document
 from docx.shared import Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml
+from docx.oxml.ns import qn
 
 # ==========================================
 # 🌟 全域參數設定
@@ -30,7 +31,7 @@ if st.session_state.get("authentication_status") is not True:
 st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", layout="wide")
 
 # ==========================================
-# 🎨 系統 UI 樣式設定
+# 🎨 系統 UI 樣式設定 (全展開易讀版)
 # ==========================================
 st.markdown("""
 <style>
@@ -59,23 +60,117 @@ st.markdown("""
         color: #FFFFFF !important; 
     }
 
-    /* 各區塊標題與底色 */
-    .morandi-select-title { background-color: #9DAB86; color: white; padding: 12px 15px; border-radius: 6px; font-weight: bold; font-size: 1.2em; margin-bottom: 5px; margin-top: 15px; }
-    .morandi-question-title { background-color: #948B89; color: white; padding: 15px 18px; border-radius: 6px; font-weight: bold; font-size: 1.4em; margin-bottom: 15px; margin-top: 10px; }
-    .morandi-orange-title { background-color: #D4A373; color: white; padding: 15px 20px; border-radius: 6px; font-weight: bold; font-size: 1.6em; margin-bottom: 15px; margin-top: 30px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .morandi-dark-title { background-color: #5C6B73; color: white; padding: 12px 20px; border-radius: 6px; font-weight: bold; font-size: 1.3em; margin-bottom: 10px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .light-blue-box { background-color: #E6F0F9; color: #2C3E50; padding: 20px; border-left: 6px solid #8FAAB8; border-radius: 6px; margin-bottom: 15px; font-size: 1.05em; line-height: 1.8; }
-    .light-yellow-box { background-color: #FDF6E3; color: #2C3E50; padding: 15px 20px; border-left: 6px solid #E6C27A; border-radius: 6px; margin-bottom: 5px; line-height: 1.6; }
+    /* 各區塊標題 */
+    .morandi-select-title { 
+        background-color: #9DAB86; 
+        color: white; 
+        padding: 12px 15px; 
+        border-radius: 6px; 
+        font-weight: bold; 
+        font-size: 1.2em; 
+        margin-bottom: 5px; 
+        margin-top: 15px; 
+    }
+    .morandi-question-title { 
+        background-color: #948B89; 
+        color: white; 
+        padding: 15px 18px; 
+        border-radius: 6px; 
+        font-weight: bold; 
+        font-size: 1.4em; 
+        margin-bottom: 15px; 
+        margin-top: 10px; 
+    }
+    .morandi-orange-title { 
+        background-color: #D4A373; 
+        color: white; 
+        padding: 15px 20px; 
+        border-radius: 6px; 
+        font-weight: bold; 
+        font-size: 1.6em; 
+        margin-bottom: 15px; 
+        margin-top: 30px; 
+        text-align: center; 
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
+    }
+    .morandi-dark-title { 
+        background-color: #5C6B73; 
+        color: white; 
+        padding: 12px 20px; 
+        border-radius: 6px; 
+        font-weight: bold; 
+        font-size: 1.3em; 
+        margin-bottom: 10px; 
+        margin-top: 15px; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+    }
+    
+    /* 內容底色區塊 */
+    .light-blue-box { 
+        background-color: #E6F0F9; 
+        color: #2C3E50; 
+        padding: 20px; 
+        border-left: 6px solid #8FAAB8; 
+        border-radius: 6px; 
+        margin-bottom: 15px; 
+        font-size: 1.05em; 
+        line-height: 1.8; 
+    }
+    .light-yellow-box { 
+        background-color: #FDF6E3; 
+        color: #2C3E50; 
+        padding: 15px 20px; 
+        border-left: 6px solid #E6C27A; 
+        border-radius: 6px; 
+        margin-bottom: 5px; 
+        line-height: 1.6; 
+    }
+    .light-brown-box { 
+        background-color: #F5EBE0; 
+        color: #2C3E50; 
+        padding: 15px 20px; 
+        border-left: 6px solid #D4A373; 
+        border-radius: 6px; 
+        margin-bottom: 5px; 
+        line-height: 1.6; 
+    }
     
     /* 折疊面板 */
-    [data-testid="stExpander"] details summary { background-color: #2C3E50 !important; color: white !important; border-radius: 6px; }
-    [data-testid="stExpander"] details summary p { color: white !important; font-size: 1.2em !important; font-weight: bold; }
-    [data-testid="stExpander"] details summary svg { fill: white !important; }
-    [data-testid="stExpander"] details[open] > div:nth-child(2) { background-color: #F4F6F7 !important; border: 2px solid #2C3E50; border-top: none; border-radius: 0 0 6px 6px; padding: 15px; }
+    [data-testid="stExpander"] details summary { 
+        background-color: #2C3E50 !important; 
+        color: white !important; 
+        border-radius: 6px; 
+    }
+    [data-testid="stExpander"] details summary p { 
+        color: white !important; 
+        font-size: 1.2em !important; 
+        font-weight: bold; 
+    }
+    [data-testid="stExpander"] details summary svg { 
+        fill: white !important; 
+    }
+    [data-testid="stExpander"] details[open] > div:nth-child(2) { 
+        background-color: #F4F6F7 !important; 
+        border: 2px solid #2C3E50; 
+        border-top: none; 
+        border-radius: 0 0 6px 6px; 
+        padding: 15px; 
+    }
     
     /* 按鈕樣式 */
-    div.stButton > button[kind="secondary"] { background-color: #D6EAF8 !important; color: #154360 !important; border: 1px solid #AED6F1 !important; border-radius: 6px !important; font-weight: bold !important; }
-    div.stButton > button[kind="primary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.4em !important; padding: 12px 30px !important; }
+    div.stButton > button[kind="secondary"] { 
+        background-color: #D6EAF8 !important; 
+        color: #154360 !important; 
+        border: 1px solid #AED6F1 !important; 
+        border-radius: 6px !important; 
+        font-weight: bold !important; 
+    }
+    div.stButton > button[kind="primary"] { 
+        border-radius: 8px !important; 
+        font-weight: bold !important; 
+        font-size: 1.4em !important; 
+        padding: 12px 30px !important; 
+    }
     
     /* 下載 Word 按鈕專屬樣式：莫蘭迪橘底白字 */
     [data-testid="stDownloadButton"] button {
@@ -88,13 +183,27 @@ st.markdown("""
         padding: 12px 24px !important;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    [data-testid="stDownloadButton"] button:hover { background-color: #C39262 !important; }
-    [data-testid="stDownloadButton"] button * { color: white !important; }
+    [data-testid="stDownloadButton"] button:hover { 
+        background-color: #C39262 !important; 
+    }
+    [data-testid="stDownloadButton"] button * { 
+        color: white !important; 
+    }
 
-    [data-testid="stFileUploadDropzone"] small { display: none !important; }
-    .custom-scrollbar::-webkit-scrollbar { width: 8px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #8F9CA3; border-radius: 4px; }
+    [data-testid="stFileUploadDropzone"] small { 
+        display: none !important; 
+    }
+    .custom-scrollbar::-webkit-scrollbar { 
+        width: 8px; 
+    }
+    .custom-scrollbar::-webkit-scrollbar-track { 
+        background: #f1f1f1; 
+        border-radius: 4px; 
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb { 
+        background: #8F9CA3; 
+        border-radius: 4px; 
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -114,20 +223,29 @@ def get_gcp_credentials():
 @st.cache_data(ttl=600)
 def load_gsheet_data():
     try:
-        gc = gspread.authorize(get_gcp_credentials())
-        df = pd.DataFrame(gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("評比題目表").get_all_records())
+        creds = get_gcp_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8')
+        worksheet = sh.worksheet("評比題目表")
+        data = worksheet.get_all_records()
+        df = pd.DataFrame(data)
         df.columns = df.columns.str.strip()
         return df
     except Exception as e: 
+        st.error(f"讀取題目表失敗: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def load_reported_data():
     try:
-        gc = gspread.authorize(get_gcp_credentials())
-        df = pd.DataFrame(gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("填報資料庫").get_all_records())
-        return df
+        creds = get_gcp_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8')
+        worksheet = sh.worksheet("填報資料庫")
+        data = worksheet.get_all_records()
+        return pd.DataFrame(data)
     except Exception as e: 
+        st.error(f"讀取資料庫失敗: {e}")
         return pd.DataFrame()
 
 # ==========================================
@@ -168,15 +286,18 @@ def compress_image(file_obj):
 
 def upload_file_to_drive(file_obj, filename, folder_id):
     try:
-        drive_service = build('drive', 'v3', credentials=get_gcp_credentials())
+        creds = get_gcp_credentials()
+        drive_service = build('drive', 'v3', credentials=creds)
+        file_metadata = {'name': filename, 'parents': [folder_id]}
         media = MediaIoBaseUpload(io.BytesIO(file_obj.getvalue()), mimetype=file_obj.type, resumable=True)
         uploaded_file = drive_service.files().create(
-            body={'name': filename, 'parents': [folder_id]}, 
+            body=file_metadata, 
             media_body=media, 
             fields='id'
         ).execute()
         return uploaded_file.get('id')
     except Exception as e: 
+        st.error(f"上傳失敗: {e}")
         return None
 
 # ==========================================
@@ -185,22 +306,27 @@ def upload_file_to_drive(file_obj, filename, folder_id):
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_file_info(file_id, desc=""):
     try:
-        drive_service = build('drive', 'v3', credentials=get_gcp_credentials())
+        creds = get_gcp_credentials()
+        drive_service = build('drive', 'v3', credentials=creds)
+        
+        # 取得 MIME 類型
         meta = drive_service.files().get(fileId=file_id, fields='mimeType').execute()
         mime_type = meta.get('mimeType', '')
         
         is_pdf = 'pdf' in mime_type.lower()
         is_image = mime_type.startswith('image/')
         
+        # 下載檔案內容
         request = drive_service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
         done = False
         while not done: 
-            _, done = downloader.next_chunk()
+            status, done = downloader.next_chunk()
         fh.seek(0)
         file_bytes = fh.read()
         
+        # 判斷直橫式
         is_landscape = True
         if is_image:
             try:
@@ -223,30 +349,35 @@ def get_file_info(file_id, desc=""):
     except Exception as e: 
         return None
 
-def write_to_database(unit, q_id, q_title, report_text, file_records):
+def write_to_database(unit, reporter, ext, email, q_id, q_title, report_text, file_records):
     try:
-        gc = gspread.authorize(get_gcp_credentials())
-        ws = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("填報資料庫")
+        creds = get_gcp_credentials()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8')
+        ws = sh.worksheet("填報資料庫")
         
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row = [now_str, unit, q_id, q_title, report_text]
         
-        for record in file_records: 
+        # 建立要寫入的列 (支援至 28 欄)
+        row = [now_str, unit, reporter, ext, email, q_id, q_title, report_text]
+        
+        for record in file_records[:10]: # 最多支援 10 組檔案
             row.extend([record['desc'], record['id']])
             
-        # 補齊空欄位至 15 格
-        row += [''] * (15 - len(row))
-        ws.append_row(row[:15])
+        # 補齊空欄位至 28 格
+        row += [''] * (28 - len(row))
+        ws.append_row(row[:28])
         return True
     except Exception as e: 
+        st.error(f"寫入資料庫失敗：{e}")
         return False
 
 # ==========================================
-# 🌟 智慧文字解析引擎：完美縮排
+# 🌟 智慧文字解析引擎：網頁完美縮排
 # ==========================================
 def format_report_text_to_html(text):
     text = str(text)
-    # 修復換行問題
+    # 修復錯誤換行
     text = re.sub(r'(^|\n)(\d+[\.\)]|[-•*])\s*\n\s*', r'\1\2 ', text)
     
     html = ""
@@ -267,44 +398,65 @@ def format_report_text_to_html(text):
     return html.replace('\n', ' ')
 
 # ==========================================
-# 🌟 Word 報告產製引擎 (智慧排序 + 柔邊 2.5 點)
+# 🌟 Word 報告產製引擎 (中英字體分離 + 左右對齊 + 完美縮排)
 # ==========================================
-def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, enriched_files):
+def set_run_font(run):
+    """設定 Word 雙字體：英文 Times New Roman，中文 標楷體"""
+    run.font.name = 'Times New Roman'
+    run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
+
+def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, req_text, report_text, enriched_files):
     doc = Document()
     doc.add_heading(f'嘉大綠色大學填報成果 - {unit}', 0)
+    
+    # 填報人資訊
+    if reporter or ext or email:
+        p_info = doc.add_paragraph(f"填報人：{reporter} | 分機：{ext} | Email：{email}")
+        p_info.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        
     doc.add_heading(f'{q_id} {q_title}', level=1)
     
     doc.add_heading('題目說明：', level=2)
-    doc.add_paragraph(desc_text)
+    p_desc = doc.add_paragraph(desc_text)
     
     doc.add_heading('資料需求：', level=2)
     clean_req = str(req_text).replace('<br>', '\n').replace('<b>', '').replace('</b>', '')
-    doc.add_paragraph(clean_req)
+    p_req = doc.add_paragraph(clean_req)
     
     doc.add_heading('填報資訊 / 年度執行亮點成果：', level=2)
-    doc.add_paragraph(str(report_text))
+    
+    # 逐行處理內容並設定縮排
+    report_text_clean = re.sub(r'(^|\n)(\d+[\.\)]|[-•*])\s*\n\s*', r'\1\2 ', str(report_text))
+    for line in report_text_clean.split('\n'):
+        line = line.strip()
+        if not line: 
+            continue
+            
+        p = doc.add_paragraph()
+        match = re.match(r'^(\d+[\.\)]|[-•*])\s+(.*)', line)
+        if match:
+            # 設定懸掛縮排
+            p.paragraph_format.left_indent = Cm(0.75)
+            p.paragraph_format.first_line_indent = Cm(-0.75)
+        p.add_run(line)
     
     doc.add_heading('佐證照片/檔案：', level=2)
     
-    # 智慧分離：照片(橫/直) 與 文件
+    # 分離照片與檔案
     landscapes = [f for f in enriched_files if f.get('is_image') and f.get('is_landscape')]
     portraits = [f for f in enriched_files if f.get('is_image') and not f.get('is_landscape')]
     other_docs = [f for f in enriched_files if not f.get('is_image')]
     
-    # 完美配對邏輯：橫直不交錯
+    # 橫直配對
     pairs = []
-    
-    # 配對橫式
     for i in range(0, len(landscapes) - 1, 2): 
         pairs.append((landscapes[i], landscapes[i+1]))
     rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
     
-    # 配對直式
     for i in range(0, len(portraits) - 1, 2): 
         pairs.append((portraits[i], portraits[i+1]))
     rem_p = portraits[-1] if len(portraits) % 2 != 0 else None
     
-    # 處理落單的照片
     if rem_l and rem_p: 
         pairs.append((rem_l, rem_p)) 
     elif rem_l: 
@@ -325,29 +477,27 @@ def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, 
                     try:
                         img_bytes = base64.b64decode(f['b64'])
                         fh = io.BytesIO(img_bytes)
-                        
-                        # 插入圖片並設定比例
-                        if f['is_landscape']:
+                        if f['is_landscape']: 
                             inline = p_img.add_run().add_picture(fh, width=Cm(7.5), height=Cm(5.5))
-                        else:
+                        else: 
                             inline = p_img.add_run().add_picture(fh, width=Cm(7.0), height=Cm(9.0))
                         
-                        # 🌟 注入底層 XML 實現「圖片效果：柔邊 2.5 點」
+                        # 注入 XML 產生柔邊效果
                         try:
                             pic_xml = inline._inline.xpath('.//pic:pic')[0]
                             spPr = pic_xml.xpath('.//pic:spPr')[0]
                             effectLst_xml = '<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'
                             spPr.append(parse_xml(effectLst_xml))
-                        except Exception as xml_e: 
-                            pass # 若 XML 注入失敗，仍保留圖片
+                        except Exception as e: 
+                            pass
                             
                     except Exception as e: 
                         p_img.add_run("(圖片無法插入)")
                     
-                    p_text = cell.add_paragraph(f"📌 {f['desc']}")
+                    # 拔除 ICON，僅保留純文字並置中
+                    p_text = cell.add_paragraph(f"{f['desc']}")
                     p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # PDF 與其他檔案列在圖片下方
     if other_docs:
         for f in other_docs:
             p = doc.add_paragraph()
@@ -357,13 +507,27 @@ def generate_word_report(unit, q_id, q_title, desc_text, req_text, report_text, 
             
     if not pairs and not other_docs: 
         doc.add_paragraph("此紀錄無上傳任何附件。")
+    
+    # 🌟 核心排版處理：統一左右對齊與套用雙字體
+    for p in doc.paragraphs:
+        if not p.style.name.startswith('Heading'):
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        for r in p.runs: 
+            set_run_font(r)
+            
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    for r in p.runs: 
+                        set_run_font(r)
         
     out = io.BytesIO()
     doc.save(out)
     out.seek(0)
     return out
 
-# 初始化檔案數量
+# 初始化檔案上傳數量
 if "upload_count" not in st.session_state: 
     st.session_state.upload_count = 5
 
@@ -388,7 +552,7 @@ tab_fill, tab_view = st.tabs(["📝 填報區", "📊 檢視填報成果"])
 # ==========================================
 with tab_fill:
     if st.session_state.get('submit_success'):
-        st.success("🎉 填報成功！資料已寫入資料庫，頁面已清空，您可繼續填報其他項目！")
+        st.success("🎉 填報成功！資料已寫入資料庫，您可繼續填報其他項目！")
         st.session_state.submit_success = False
 
     with st.spinner('🔄 正在載入最新評比題目...'): 
@@ -410,6 +574,16 @@ with tab_fill:
                 st.markdown("<div class='morandi-select-title'>📌 請選擇填報項目</div>", unsafe_allow_html=True)
                 selected_option = st.selectbox("", ["請選擇..."] + df_unit_questions['選項標示'].tolist(), label_visibility="collapsed", key="sel_item")
             
+            # 🌟 新增：填報人基本資料輸入區
+            st.markdown("<div class='morandi-dark-title'>👤 填報人基本資料</div>", unsafe_allow_html=True)
+            c_name, c_ext, c_email = st.columns(3)
+            with c_name: 
+                reporter_name = st.text_input("填報人姓名", key="reporter_name", placeholder="請輸入姓名")
+            with c_ext: 
+                reporter_ext = st.text_input("分機號碼", key="reporter_ext", placeholder="例如：1234")
+            with c_email: 
+                reporter_email = st.text_input("電子郵件", key="reporter_email", placeholder="請輸入 Email")
+            
             if selected_option != "請選擇...":
                 selected_q_id = selected_option.split(" - ")[0]
                 question_data = df_unit_questions[df_unit_questions['當年度題目'].astype(str) == selected_q_id].iloc[0]
@@ -419,7 +593,6 @@ with tab_fill:
                 
                 desc_text = str(question_data.get('中文說明', '無')).replace('中文說明：', '').replace('中文說明:', '').strip()
                 st.markdown(f"<div style='color: #B85042; font-weight: bold; font-size: 1.3em; padding-left: 5px; margin-bottom: 25px;'>{desc_text}</div>", unsafe_allow_html=True)
-                st.write("")
                 
                 prev_q = str(question_data.get('前一年度題目', '')).strip()
                 if not prev_q or prev_q.lower() in ['nan', '無', '']: 
@@ -480,8 +653,11 @@ with tab_fill:
                 
                 col_add, col_sub, _ = st.columns([2, 2, 6])
                 if col_add.button("➕ 新增一筆檔案區"): 
-                    st.session_state.upload_count += 1
-                    st.rerun()
+                    if st.session_state.upload_count < 10:
+                        st.session_state.upload_count += 1
+                        st.rerun()
+                    else:
+                        st.warning("最多僅支援上傳 10 組檔案！")
                 if col_sub.button("➖ 減少一筆檔案區"):
                     if st.session_state.upload_count > 1: 
                         st.session_state.upload_count -= 1
@@ -515,7 +691,6 @@ with tab_fill:
                         with st.spinner("⏳ 正在無損壓縮檔案並寫入資料庫..."):
                             upload_records = []
                             for i, vf in enumerate(valid_files):
-                                # 呼叫無損壓縮引擎
                                 optimized_file = compress_image(vf['file'])
                                 ext = optimized_file.name.split('.')[-1]
                                 safe_desc = vf['desc'].strip() if vf['desc'].strip() else f"未命名附件{i+1}"
@@ -525,9 +700,15 @@ with tab_fill:
                                 if file_id: 
                                     upload_records.append({'desc': safe_desc, 'id': file_id})
                             
-                            if write_to_database(selected_unit, selected_q_id, question_data.get('中文標題', ''), report_text, upload_records):
+                            db_success = write_to_database(
+                                selected_unit, reporter_name, reporter_ext, reporter_email, 
+                                selected_q_id, question_data.get('中文標題', ''), 
+                                report_text, upload_records
+                            )
+                            
+                            if db_success:
                                 st.session_state.submit_success = True
-                                # 清空輸入欄位
+                                # 清空輸入區塊，但保留聯絡資訊與選擇單位
                                 for key in list(st.session_state.keys()):
                                     if key in ["sel_item", "report_input"] or key.startswith("desc_") or key.startswith("file_"): 
                                         del st.session_state[key]
@@ -568,6 +749,7 @@ with tab_view:
             if view_item != "請選擇...":
                 v_q_id = view_item.split(" - ")[0]
                 latest_record = df_view_unit[df_view_unit['題號'].astype(str) == v_q_id].iloc[-1]
+                
                 v_q_title = latest_record.get('中文標題', '')
                 v_desc_text, v_req_text = "無", "無特別說明"
                 
@@ -578,12 +760,20 @@ with tab_view:
                         v_req_text = str(q_match.iloc[0].get('資料需求', '無特別說明'))
                 
                 st.markdown("---")
+                
+                # 顯示填報人資訊
+                v_reporter = latest_record.get('填報人', '無')
+                v_ext = latest_record.get('填報人分機', '無')
+                v_email = latest_record.get('填報人電子郵件', '無')
+                st.caption(f"👤 填報人：{v_reporter} | 📞 分機：{v_ext} | 📧 Email：{v_email}")
+                
                 st.markdown(f"<div class='morandi-question-title'>📖 {v_q_id}：{v_q_title}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='color: #B85042; font-weight: bold; font-size: 1.3em; padding-left: 5px; margin-bottom: 25px;'>{v_desc_text}</div>", unsafe_allow_html=True)
                 
+                # 🌟 修改：資料需求改為淺棕色底色
                 st.markdown(f"""
-                <div class='light-yellow-box'>
-                    <strong style='font-size: 1.4em; color: #B85042;'>🔍 貴單位已針對下列需求提供資料：</strong><br>
+                <div class='light-brown-box'>
+                    <strong style='font-size: 1.4em; color: #B85042;'>🔍 資料需求：</strong><br>
                     <div style='font-size: 1.2em; margin-top: 10px; padding-left: 10px; color: #2C3E50;'>{v_req_text.replace(chr(10), '<br>')}</div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -592,9 +782,9 @@ with tab_view:
                 formatted_report = format_report_text_to_html(latest_record.get('填報內容', '無'))
                 st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
                 
-                # 取得附件清單
+                # 🌟 支援讀取 10 組檔案
                 raw_files = []
-                for i in range(1, 6):
+                for i in range(1, 11):
                     desc = str(latest_record.get(f'檔案{i}_說明', '')).strip()
                     fid = str(latest_record.get(f'檔案{i}_ID', '')).strip()
                     if fid: 
@@ -608,12 +798,10 @@ with tab_view:
                 
                 st.markdown("<div class='morandi-dark-title'>📎 佐證照片或檔案</div>", unsafe_allow_html=True)
                 
-                # 分離相片與文件
                 landscapes = [f for f in enriched_files if f.get('is_image') and f.get('is_landscape')]
                 portraits = [f for f in enriched_files if f.get('is_image') and not f.get('is_landscape')]
                 other_docs = [f for f in enriched_files if not f.get('is_image')]
                 
-                # 橫直完美配對顯示
                 pairs = []
                 for i in range(0, len(landscapes) - 1, 2): 
                     pairs.append((landscapes[i], landscapes[i+1]))
@@ -664,7 +852,10 @@ with tab_view:
                 st.markdown("<div style='text-align: center; margin-bottom: 10px;'><b>想要留存這份填報紀錄嗎？</b></div>", unsafe_allow_html=True)
                 
                 with st.spinner("⏳ 正在為您產生 Word 報告檔案..."):
-                    docx_bytes = generate_word_report(view_unit, v_q_id, v_q_title, v_desc_text, v_req_text, latest_record.get('填報內容', ''), enriched_files)
+                    docx_bytes = generate_word_report(
+                        view_unit, v_reporter, v_ext, v_email, v_q_id, v_q_title, 
+                        v_desc_text, v_req_text, latest_record.get('填報內容', ''), enriched_files
+                    )
                 
                 col_dl1, col_dl2, col_dl3 = st.columns([3, 4, 3])
                 with col_dl2:
