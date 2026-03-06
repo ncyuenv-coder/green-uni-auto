@@ -12,7 +12,7 @@ from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from docx import Document
 from docx.shared import Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_ALIGN_VERTICAL  # 🌟 新增：Word 垂直置中模組
+from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 
@@ -319,7 +319,6 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
             row = table.add_row()
             cell = row.cells[0]
             cell.merge(row.cells[1])
-            # 🌟 設定儲存格垂直置中
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             p_img = cell.paragraphs[0]
             p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -353,7 +352,6 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
             row = table.add_row()
             for idx, f in enumerate([p1, p2]):
                 cell = row.cells[idx]
-                # 🌟 設定儲存格垂直置中
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 if f:
                     p_img = cell.paragraphs[0]
@@ -482,7 +480,9 @@ with tab_fill:
                             st.markdown("#### 🇹🇼 中文翻譯參考")
                             ref_text = question_data.get('2025參考文字_AI預留', '')
                             if pd.notna(ref_text) and str(ref_text).strip() != "": 
-                                st.markdown(f'<div class="custom-scrollbar" style="background-color: #FFFFFF; padding: 20px; border-radius: 8px; border: 2px solid #E2E7E3; height: 600px; overflow-y: auto; line-height: 1.8; font-size: 1.1em; color: #2C3E50; white-space: pre-wrap;">{ref_text}</div>', unsafe_allow_html=True)
+                                # 🌟 同步套用 format_report_text_to_html 確保翻譯區也能完美縮排
+                                formatted_ref_text = format_report_text_to_html(str(ref_text).strip())
+                                st.markdown(f'<div class="custom-scrollbar" style="background-color: #FFFFFF; padding: 20px; border-radius: 8px; border: 2px solid #E2E7E3; height: 600px; overflow-y: auto; font-size: 1.1em; color: #2C3E50;">{formatted_ref_text}</div>', unsafe_allow_html=True)
                             else: 
                                 st.info("*(🚧 尚無文字資料)*")
                 
@@ -679,7 +679,6 @@ with tab_view:
                 if len(enriched_files) == 0:
                     st.info("此紀錄無上傳任何附件。")
                 else:
-                    # 🌟 將所有照片放入 HTML Table，並設定垂直置中 (vertical-align: middle)
                     table_html = "<table style='width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #D9E0E3; background-color:white; margin-bottom: 25px;'>"
                     
                     for pano in panoramas:
@@ -701,7 +700,6 @@ with tab_view:
                         for f in [p1, p2]:
                             if f:
                                 ratio = "7.5/5.5" if f['is_landscape'] else "7/9"
-                                # 🌟 加入 vertical-align: middle; 讓照片完美垂直置中
                                 table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; width:50%; vertical-align:middle;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='aspect-ratio:{ratio}; width:100%; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
                             else:
                                 table_html += "<td style='border:1px solid #D9E0E3; width:50%; vertical-align:middle;'></td>"
