@@ -18,7 +18,7 @@ from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 
-# 🌟 關閉 SSL 憑證驗證警告，讓系統保持清爽
+# 🌟 關閉 SSL 憑證驗證警告，讓終端機保持清爽
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
@@ -79,7 +79,7 @@ def save_to_ai_db(record):
         return False
 
 # ==========================================
-# 🕷️ 智慧深潛版：嘉大新聞網頁爬蟲 (突破 SSL 防護版)
+# 🕷️ 智慧深潛版：嘉大新聞網頁爬蟲 (突破 SSL 防護版 + 置頂防禦)
 # ==========================================
 def scrape_ncyu_news(start_date, end_date):
     base_url = "https://www.ncyu.edu.tw"
@@ -89,13 +89,13 @@ def scrape_ncyu_news(start_date, end_date):
     
     page = 1
     stop_scraping = False
+    old_news_count = 0 # 🌟 置頂文章防禦器
     
     while page <= 40 and not stop_scraping:
         list_url = f"{base_url}/ncyu/Subject?nodeId=835&page={page}"
         st.toast(f"📄 正在掃描第 {page} 頁新聞...", icon="👀")
         
         try:
-            # 🌟 加上 verify=False 繞過 SSL 憑證錯誤
             req = requests.get(list_url, headers=headers, timeout=10, verify=False)
             req.encoding = 'utf-8'
             soup = BeautifulSoup(req.text, 'html.parser')
@@ -105,30 +105,43 @@ def scrape_ncyu_news(start_date, end_date):
             
             for a in links:
                 href = a['href']
-                if 'Subject?nodeId=835&id=' in href:
+                # 🌟 修正：真實的新聞內文連結特徵為 /Subject/Detail/
+                if 'Subject/Detail/' in href and 'nodeId=835' in href:
                     has_news_in_page = True
-                    full_link = base_url + "/ncyu/" + href if not href.startswith('http') else href
                     
+                    if href.startswith('http'):
+                        full_link = href
+                    elif href.startswith('/'):
+                        full_link = base_url + href
+                    else:
+                        full_link = base_url + "/ncyu/" + href
+                        
                     if full_link in seen_links: continue
                     seen_links.add(full_link)
                     
-                    parent_text = a.parent.parent.text
+                    # 尋找日期 (利用向上尋找容器來提取文字，避免被切斷)
+                    container = a.find_parent(['tr', 'li', 'div', 'td'])
+                    parent_text = container.text if container else a.parent.text
                     date_match = re.search(r'20\d{2}[-/.]\d{2}[-/.]\d{2}', parent_text)
                     
                     if date_match:
                         date_str = date_match.group().replace('/', '-').replace('.', '-')
                         news_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
                         
+                        # 🌟 置頂防禦邏輯：連續遇到 5 篇舊新聞，才代表真的到底了
                         if news_date < start_date:
-                            stop_scraping = True
-                            break
+                            old_news_count += 1
+                            if old_news_count > 5:
+                                stop_scraping = True
+                                break
+                        else:
+                            old_news_count = 0 # 遇到新日期，計數器歸零
                         
                         if start_date <= news_date <= end_date:
                             title = a.get('title', '').strip() or a.text.strip()
                             title = re.sub(r'\s+', ' ', title) 
                             
                             try:
-                                # 🌟 進入內文同樣加上 verify=False
                                 d_req = requests.get(full_link, headers=headers, timeout=10, verify=False)
                                 d_req.encoding = 'utf-8'
                                 d_soup = BeautifulSoup(d_req.text, 'html.parser')
@@ -153,7 +166,7 @@ def scrape_ncyu_news(start_date, end_date):
                                     "原始內容": full_text[:2000], 
                                     "照片清單": img_urls, "新聞連結": full_link
                                 })
-                                time.sleep(0.3) 
+                                time.sleep(0.2) 
                             except Exception as e:
                                 pass 
             
@@ -165,7 +178,7 @@ def scrape_ncyu_news(start_date, end_date):
             break
             
         page += 1
-        time.sleep(0.5)
+        time.sleep(0.3)
         
     return news_items
 
@@ -204,7 +217,6 @@ def process_news_with_ai(news_item, q_id, q_title, q_desc):
 # ==========================================
 def url_to_bytes(url):
     try:
-        # 🌟 轉換圖片 URL 時，同樣略過 SSL 驗證
         req = requests.get(url, timeout=5, verify=False)
         req.raise_for_status()
         return io.BytesIO(req.content)
