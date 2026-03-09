@@ -79,7 +79,6 @@ def save_raw_to_db(record):
     except Exception: return False
 
 def delete_rows_from_db(row_indices):
-    """批次刪除指定行數 (由下往上刪，避免索引偏移)"""
     try:
         ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
         for r_idx in sorted(row_indices, reverse=True):
@@ -88,7 +87,6 @@ def delete_rows_from_db(row_indices):
     except Exception: return False
 
 def update_q_ids_in_db(updates):
-    """批次更新題號與標題"""
     try:
         ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
         headers = ws.get_all_values()[0]
@@ -103,7 +101,6 @@ def update_q_ids_in_db(updates):
     except Exception: return False
 
 def update_ai_summary_by_row(row_idx, ai_summary):
-    """根據列索引直接精準更新 AI 摘要"""
     try:
         ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
         headers = ws.get_all_values()[0]
@@ -320,7 +317,7 @@ with tab_scrape:
             df_existing = load_sheet("AI新聞資料庫")
             
             existing_set = set()
-            if not df_existing.empty:
+            if not df_existing.empty and '對應題號' in df_existing.columns and '新聞連結' in df_existing.columns:
                 for _, r in df_existing.iterrows():
                     existing_set.add(f"{str(r.get('對應題號','')).strip()}_{str(r.get('新聞連結','')).strip()}")
             
@@ -397,26 +394,30 @@ with tab_ai:
     df_ai_db = load_sheet("AI新聞資料庫")
     df_targets = load_sheet("原始新聞抓取")
     
-    # 準備供換題使用的題號清單
-    valid_q_list = []
-    if not df_targets.empty:
-        for _, r in df_targets.iterrows():
-            if str(r.get('題號', '')).strip():
-                valid_q_list.append(f"{str(r['題號']).strip()} - {str(r.get('中文標題', '')).strip()}")
+    # 🌟 資料庫健康檢查器：確保標題完全一致
+    required_cols = ['對應題號', '中文標題', '新聞日期', '新聞標題', '原始內容', 'AI摘要', '照片清單', '新聞連結']
     
     if df_ai_db.empty:
         st.warning("目前資料庫為空，請先至「階段一」進行爬蟲抓取。")
+    elif not all(col in df_ai_db.columns for col in required_cols):
+        missing = [col for col in required_cols if col not in df_ai_db.columns]
+        st.error(f"⚠️ 您的《AI新聞資料庫》缺少必要的欄位標題：`{', '.join(missing)}`")
+        st.info("👉 解決方法：請至 Google Sheet 清空資料，並確保第一列有以下 9 個欄位（不可有錯字）：\n\n`抓取時間`, `對應題號`, `中文標題`, `新聞日期`, `新聞標題`, `原始內容`, `AI摘要`, `照片清單`, `新聞連結`")
     else:
+        valid_q_list = []
+        if not df_targets.empty:
+            for _, r in df_targets.iterrows():
+                if str(r.get('題號', '')).strip():
+                    valid_q_list.append(f"{str(r['題號']).strip()} - {str(r.get('中文標題', '')).strip()}")
+        
         df_ai_db['AI摘要'] = df_ai_db['AI摘要'].astype(str).str.strip()
         df_pending = df_ai_db[df_ai_db['AI摘要'] == ''].copy()
         
         if df_pending.empty:
             st.success("🎉 太棒了！資料庫中所有新聞都已經完成 AI 摘要改寫囉！")
         else:
-            # 🌟 精確計算每一列在 Google Sheet 中的真實行數 (Data begins at row 2)
             df_pending['_row_idx'] = df_pending.index + 2
             
-            # 1. 新增預覽區塊
             st.markdown("#### 👀 預覽新聞內文 (人工審核輔助)")
             with st.expander("點此展開選擇要預覽的新聞，確認其內容是否符合題意", expanded=False):
                 prev_sel = st.selectbox("選擇預覽新聞", df_pending['新聞標題'].tolist(), key="preview_sel")
@@ -429,14 +430,11 @@ with tab_ai:
             st.markdown(f"#### 📝 待處理清單 (尚有 <span style='color:red;'>{len(df_pending)}</span> 筆)", unsafe_allow_html=True)
             st.info("💡 您可以在表格內修改「對應題號」，或勾選「刪除」剔除無關新聞。確認無誤後，勾選「跑 AI」讓 Gemini 接手處理！")
             
-            # 準備 Data Editor 顯示欄位
             df_pending.insert(0, "🤖 跑 AI", False)
             df_pending.insert(1, "🗑️ 刪除", False)
-            
-            # 將現有的題號轉換為 "題號 - 標題" 格式以便顯示
             df_pending['對應題號'] = df_pending['對應題號'].astype(str) + " - " + df_pending['中文標題'].astype(str)
             
-            display_cols = ["🤖 跑 AI", "🗑️ 刪除", "對應題號", "新聞標題", "新聞發布日期", "新聞連結", "_row_idx"]
+            display_cols = ["🤖 跑 AI", "🗑️ 刪除", "對應題號", "新聞標題", "新聞日期", "新聞連結", "_row_idx"]
             
             edited_df = st.data_editor(
                 df_pending[display_cols],
@@ -447,24 +445,20 @@ with tab_ai:
                     "🗑️ 刪除": st.column_config.CheckboxColumn("🗑️ 刪除", default=False),
                     "對應題號": st.column_config.SelectboxColumn("對應題號 (點擊可換題)", options=valid_q_list, required=True),
                     "新聞連結": st.column_config.LinkColumn("連結"),
-                    "_row_idx": None # 隱藏底層行號
+                    "_row_idx": None
                 },
-                disabled=["新聞標題", "新聞發布日期", "新聞連結"]
+                disabled=["新聞標題", "新聞日期", "新聞連結"]
             )
             
             st.write("")
             c_save, c_space, c_ai = st.columns([4, 1, 4])
             
-            # 🌟 按鈕 A：僅儲存異動與刪除 (不耗額度)
             with c_save:
                 if st.button("💾 僅儲存題號異動與刪除清單", type="secondary", use_container_width=True):
                     with st.spinner("正在處理資料庫異動..."):
-                        # 處理刪除
                         del_rows = edited_df[edited_df['🗑️ 刪除']]['_row_idx'].tolist()
-                        if del_rows:
-                            delete_rows_from_db(del_rows)
+                        if del_rows: delete_rows_from_db(del_rows)
                             
-                        # 處理題號異動
                         updates = []
                         for idx, row in edited_df.iterrows():
                             if not row['🗑️ 刪除']:
@@ -475,17 +469,14 @@ with tab_ai:
                                     new_title = new_full_id.split(" - ")[1]
                                     updates.append({'row': row['_row_idx'], 'new_id': new_id, 'new_title': new_title})
                         
-                        if updates:
-                            update_q_ids_in_db(updates)
+                        if updates: update_q_ids_in_db(updates)
                             
                         st.success("✅ 異動與刪除已儲存！")
                         time.sleep(1)
                         st.rerun()
 
-            # 🌟 按鈕 B：執行 AI 摘要 (耗額度)
             with c_ai:
                 if st.button("🚀 啟動 Gemini 智慧改寫已勾選項目", type="primary", use_container_width=True):
-                    # 只過濾有勾選跑AI 且 沒有勾選刪除 的列
                     ai_rows = edited_df[(edited_df['🤖 跑 AI']) & (~edited_df['🗑️ 刪除'])]
                     
                     if ai_rows.empty:
@@ -504,18 +495,15 @@ with tab_ai:
                                 progress_text2.markdown(f"**✨ 處理中 ({i+1}/{len(ai_rows)})：** {row['新聞標題']}")
                                 bar2.progress((i + 1) / len(ai_rows))
                                 
-                                # 去原始 Pending 表撈完整內容
                                 full_content = df_pending[df_pending['_row_idx'] == real_row_idx].iloc[0]['原始內容']
                                 news_item = {'新聞標題': row['新聞標題'], '原始內容': full_content}
                                 
-                                # 呼叫 Gemini (針對選定的新標題進行摘要)
                                 ai_summary = process_news_with_ai(news_item, target_title)
                                 
-                                # 直接根據列號精準更新
                                 if update_ai_summary_by_row(real_row_idx, ai_summary):
                                     success_ai += 1
                                     
-                                time.sleep(1.5) # 防止 API QPS 過高
+                                time.sleep(1.5)
                                 
                             progress_text2.empty()
                             bar2.empty()
@@ -531,8 +519,8 @@ with tab_view:
     
     df_ai_db = load_sheet("AI新聞資料庫")
     
-    if df_ai_db.empty: 
-        st.info("💡 目前資料庫中尚未有紀錄。")
+    if df_ai_db.empty or not all(col in df_ai_db.columns for col in required_cols): 
+        st.info("💡 目前資料庫中尚未有紀錄或欄位不齊全。")
     else:
         df_ai_db['AI摘要'] = df_ai_db['AI摘要'].astype(str).str.strip()
         df_completed = df_ai_db[df_ai_db['AI摘要'] != '']
@@ -563,7 +551,7 @@ with tab_view:
                 
                 for idx, row in df_records.iterrows():
                     st.markdown(f"#### 📰 新聞標題：{row['新聞標題']}")
-                    st.caption(f"📅 發布日期：{row['新聞發布日期']}")
+                    st.caption(f"📅 發布日期：{row['新聞日期']}")
                     
                     urls = str(row.get('照片清單', '')).split(',')
                     urls = [u for u in urls if u.strip()]
@@ -584,7 +572,7 @@ with tab_view:
                     c_left, c_right = st.columns([1, 1])
                     with c_left:
                         st.markdown("**📄 原始新聞內容**")
-                        st.markdown(f"<div style='background-color:#FDF6E3; padding:20px; border-radius:8px; border-left:5px solid #E6C27A; height:350px; overflow-y:auto; color:#555;'>{row['新聞完整內容']}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='background-color:#FDF6E3; padding:20px; border-radius:8px; border-left:5px solid #E6C27A; height:350px; overflow-y:auto; color:#555;'>{row['原始內容']}</div>", unsafe_allow_html=True)
                     with c_right:
                         st.markdown("**✨ Gemini 濃縮摘要 (含 SDGs)**")
                         fmt_ai = format_report_text_to_html(row['AI摘要'])
@@ -594,7 +582,7 @@ with tab_view:
                     st.markdown("<hr style='border:1px dashed #ccc;'>", unsafe_allow_html=True)
                     
                     records_to_print.append({
-                        '新聞標題': row['新聞標題'], '新聞日期': row['新聞發布日期'],
+                        '新聞標題': row['新聞標題'], '新聞日期': row['新聞日期'],
                         'AI摘要': row['AI摘要'], '照片清單': ",".join(urls),
                         '新聞連結': row['新聞連結']
                     })
