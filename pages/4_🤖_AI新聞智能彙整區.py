@@ -166,6 +166,7 @@ def get_news_list(start_date, end_date):
         time.sleep(0.2)
     return news_list
 
+# 🌟 升級版：去雜訊內文擷取引擎
 def get_news_content(url):
     base_url = "https://www.ncyu.edu.tw"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -174,21 +175,42 @@ def get_news_content(url):
         d_req.encoding = 'utf-8'
         d_soup = BeautifulSoup(d_req.text, 'html.parser')
         
-        content_div = d_soup.find('div', class_=re.compile(r'content|mcont|user_edit|article', re.I))
-        if not content_div: content_div = d_soup.find('body')
-        for script in content_div(["script", "style"]): script.decompose()
-        full_text = content_div.text.strip()
-        full_text = re.sub(r'\n+', '\n', full_text)
+        # 移除所有隱藏或功能性的標籤
+        for script in d_soup(["script", "style", "noscript"]):
+            script.decompose()
+            
+        # 尋找內文區塊：加入台灣政府/校園網站常見的 class (如 editor, m-edit, user_edit)
+        content_div = d_soup.find('div', class_=re.compile(r'user_edit|m-edit|editor|page-content|article-content|content', re.I))
+        
+        if not content_div:
+            content_div = d_soup.find('main')
+            
+        if not content_div:
+            # 如果真的都找不到，啟動「暴力去雜訊」模式：把頁首頁尾導覽列全砍了，剩下的就是內文
+            for unwanted in d_soup(['header', 'footer', 'nav', 'aside']):
+                unwanted.decompose()
+            for unwanted_class in d_soup.find_all(attrs={"class": re.compile(r'menu|nav|footer|header|breadcrumb', re.I)}):
+                unwanted_class.decompose()
+            for unwanted_id in d_soup.find_all(attrs={"id": re.compile(r'menu|nav|header|footer', re.I)}):
+                unwanted_id.decompose()
+            content_div = d_soup.find('body')
+            
+        # 提取文字，並用換行符號取代原本的空白，保持段落感
+        full_text = content_div.get_text(separator='\n', strip=True)
+        full_text = re.sub(r'\n+', '\n', full_text) # 將多個換行壓縮成單一換行
         
         img_urls = []
         for img in content_div.find_all('img'):
             src = img.get('src')
             if src and not src.startswith('data:'):
                 img_link = src if src.startswith('http') else base_url + src
+                # 過濾掉小圖示
                 if 'icon' not in img_link.lower() and 'logo' not in img_link.lower():
                     img_urls.append(img_link)
+                    
         return {"原始內容": full_text[:2500], "照片清單": img_urls}
-    except Exception: return {"原始內容": "無法擷取內文", "照片清單": []}
+    except Exception: 
+        return {"原始內容": "無法擷取內文", "照片清單": []}
 
 # ==========================================
 # 🧠 Gemini AI 摘要引擎
@@ -394,7 +416,6 @@ with tab_ai:
     df_ai_db = load_sheet("AI新聞資料庫")
     df_targets = load_sheet("原始新聞抓取")
     
-    # 🌟 資料庫健康檢查器：確保標題完全一致
     required_cols = ['對應題號', '中文標題', '新聞日期', '新聞標題', '原始內容', 'AI摘要', '照片清單', '新聞連結']
     
     if df_ai_db.empty:
@@ -402,7 +423,7 @@ with tab_ai:
     elif not all(col in df_ai_db.columns for col in required_cols):
         missing = [col for col in required_cols if col not in df_ai_db.columns]
         st.error(f"⚠️ 您的《AI新聞資料庫》缺少必要的欄位標題：`{', '.join(missing)}`")
-        st.info("👉 解決方法：請至 Google Sheet 清空資料，並確保第一列有以下 9 個欄位（不可有錯字）：\n\n`抓取時間`, `對應題號`, `中文標題`, `新聞日期`, `新聞標題`, `原始內容`, `AI摘要`, `照片清單`, `新聞連結`")
+        st.info("👉 解決方法：請至 Google Sheet 確保第一列有以下 9 個欄位：\n\n`抓取時間`, `對應題號`, `中文標題`, `新聞日期`, `新聞標題`, `原始內容`, `AI摘要`, `照片清單`, `新聞連結`")
     else:
         valid_q_list = []
         if not df_targets.empty:
