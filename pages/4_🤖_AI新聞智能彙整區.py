@@ -166,7 +166,7 @@ def get_news_list(start_date, end_date):
         time.sleep(0.2)
     return news_list
 
-# 🌟 升級版：去雜訊內文擷取引擎
+# 🌟 升級版：純淨內文萃取器 (去雜訊 + 密度探測)
 def get_news_content(url):
     base_url = "https://www.ncyu.edu.tw"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -175,40 +175,76 @@ def get_news_content(url):
         d_req.encoding = 'utf-8'
         d_soup = BeautifulSoup(d_req.text, 'html.parser')
         
-        # 移除所有隱藏或功能性的標籤
-        for script in d_soup(["script", "style", "noscript"]):
-            script.decompose()
+        # 1. 暴力清除所有無關的 HTML 標籤
+        for tag in d_soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
+            tag.decompose()
             
-        # 尋找內文區塊：加入台灣政府/校園網站常見的 class (如 editor, m-edit, user_edit)
-        content_div = d_soup.find('div', class_=re.compile(r'user_edit|m-edit|editor|page-content|article-content|content', re.I))
-        
+        # 移除包含特定關鍵字的 class 或 id 區塊 (導覽列、頁尾等)
+        noise_patterns = re.compile(r'menu|nav|footer|breadcrumb|sidebar|top-bar|bottom-bar|search|language|header', re.I)
+        for div in d_soup.find_all(['div', 'ul', 'ol', 'section']):
+            class_str = ' '.join(div.get('class', [])) if isinstance(div.get('class'), list) else str(div.get('class', ''))
+            id_str = str(div.get('id', ''))
+            if noise_patterns.search(class_str) or noise_patterns.search(id_str):
+                div.decompose()
+
+        # 2. 尋找精準內文標籤 (針對台灣校園常見的 CMS)
+        specific_classes = ['m-edit', 'user_edit', 'article-content', 'news-content', 'CCms_Content', 'cg-desc', 'editor', 'app-article']
+        content_div = None
+        for cls in specific_classes:
+            content_div = d_soup.find('div', class_=re.compile(cls, re.I))
+            if content_div: break
+            
+        # 3. 啟發式文字密度探測 (若找不到特定標籤)
         if not content_div:
-            content_div = d_soup.find('main')
-            
-        if not content_div:
-            # 如果真的都找不到，啟動「暴力去雜訊」模式：把頁首頁尾導覽列全砍了，剩下的就是內文
-            for unwanted in d_soup(['header', 'footer', 'nav', 'aside']):
-                unwanted.decompose()
-            for unwanted_class in d_soup.find_all(attrs={"class": re.compile(r'menu|nav|footer|header|breadcrumb', re.I)}):
-                unwanted_class.decompose()
-            for unwanted_id in d_soup.find_all(attrs={"id": re.compile(r'menu|nav|header|footer', re.I)}):
-                unwanted_id.decompose()
-            content_div = d_soup.find('body')
-            
-        # 提取文字，並用換行符號取代原本的空白，保持段落感
+            best_node = None
+            max_score = 0
+            for node in d_soup.find_all(['div', 'article', 'main']):
+                text_len = len(node.get_text(strip=True))
+                if text_len < 50: continue
+                # 計算連結文字比例，若大於 40% 代表這是目錄或側邊欄，直接剔除
+                link_len = sum(len(a.get_text(strip=True)) for a in node.find_all('a'))
+                if text_len > 0 and (link_len / text_len) > 0.4: continue 
+                
+                p_count = len(node.find_all('p', recursive=False))
+                score = text_len + (p_count * 50)
+                if score > max_score:
+                    max_score = score
+                    best_node = node
+            content_div = best_node if best_node else d_soup.find('body')
+
+        # 4. 抽取純文字並進行最後的字典去雜訊
         full_text = content_div.get_text(separator='\n', strip=True)
-        full_text = re.sub(r'\n+', '\n', full_text) # 將多個換行壓縮成單一換行
         
+        # 🌟 垃圾字元過濾黑名單
+        garbage_words = [
+            '國立嘉義大學', ':::', '回首頁', '網站導覽', '分眾導覽', '新生教務專欄', 
+            '學生', '教師', '職員工', '校友', '民眾', '聯絡我們', 'ENGLISH', 
+            'Select Language', '中文 (繁體)', '中文 (简体)', '日本語', 'Bahasa Indonesia', 
+            'हिन्दी', 'Español', 'বাংলা', 'Français', 'العربية', 'English', 'ไทย', 
+            'اردو', 'Bahasa Melayu', 'Filipino', 'Tiếng Việt', 'မြန်မာ', '한국어', 
+            '請輸入關鍵字', '搜尋', '友善列印(開新視窗)', '分享至臉書(開新視窗)', '分享至Line(開新視窗)', '回上一頁'
+        ]
+        
+        clean_lines = []
+        for line in full_text.split('\n'):
+            line_str = line.strip()
+            if not line_str: continue
+            if line_str in garbage_words: continue # 命中垃圾字，直接刪除
+            if len(line_str) <= 3 and '::' in line_str: continue
+            clean_lines.append(line_str)
+            
+        final_text = '\n'.join(clean_lines)
+        
+        # 5. 抓取圖片
         img_urls = []
         for img in content_div.find_all('img'):
             src = img.get('src')
             if src and not src.startswith('data:'):
                 img_link = src if src.startswith('http') else base_url + src
-                # 過濾掉小圖示
-                if 'icon' not in img_link.lower() and 'logo' not in img_link.lower():
+                if 'icon' not in img_link.lower() and 'logo' not in img_link.lower() and 'banner' not in img_link.lower():
                     img_urls.append(img_link)
                     
-        return {"原始內容": full_text[:2500], "照片清單": img_urls}
+        return {"原始內容": final_text[:3000], "照片清單": img_urls}
     except Exception: 
         return {"原始內容": "無法擷取內文", "照片清單": []}
 
