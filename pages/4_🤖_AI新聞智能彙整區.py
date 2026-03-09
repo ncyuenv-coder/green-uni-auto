@@ -49,7 +49,7 @@ st.markdown("""
     div.stButton > button[kind="secondary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.3em !important; padding: 12px 30px !important; background-color: #8FAAB8 !important; color: white !important; border: none !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     div.stButton > button[kind="secondary"]:hover { background-color: #738A96 !important; }
     [data-testid="stDownloadButton"] button { background-color: #D4A373 !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: bold !important; font-size: 1.3em !important; padding: 12px 24px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .raw-box { background-color: #FDF6E3; padding: 20px; border-left: 5px solid #E6C27A; border-radius: 6px; height: 300px; overflow-y: auto; line-height: 1.6; font-size: 1.1em; color: #555;}
+    .raw-box { background-color: #FDF6E3; padding: 20px; border-left: 5px solid #E6C27A; border-radius: 6px; height: 300px; overflow-y: auto; line-height: 1.8; font-size: 1.1em; color: #333;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -71,7 +71,7 @@ def save_raw_to_db(record):
         row = [
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             record['題號'], record['中文標題'], record['新聞日期'],
-            record['新聞標題'], record['原始內容'], "", # AI摘要留空
+            record['新聞標題'], record['原始內容'], "", 
             ",".join(record['照片清單']), record['新聞連結']
         ]
         ws.append_row(row)
@@ -166,7 +166,7 @@ def get_news_list(start_date, end_date):
         time.sleep(0.2)
     return news_list
 
-# 🌟 升級版：純淨內文萃取器 (去雜訊 + 密度探測)
+# 🌟 升級版：純淨內文萃取器 (流暢段落接合)
 def get_news_content(url):
     base_url = "https://www.ncyu.edu.tw"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -179,7 +179,6 @@ def get_news_content(url):
         for tag in d_soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
             tag.decompose()
             
-        # 移除包含特定關鍵字的 class 或 id 區塊 (導覽列、頁尾等)
         noise_patterns = re.compile(r'menu|nav|footer|breadcrumb|sidebar|top-bar|bottom-bar|search|language|header', re.I)
         for div in d_soup.find_all(['div', 'ul', 'ol', 'section']):
             class_str = ' '.join(div.get('class', [])) if isinstance(div.get('class'), list) else str(div.get('class', ''))
@@ -187,21 +186,19 @@ def get_news_content(url):
             if noise_patterns.search(class_str) or noise_patterns.search(id_str):
                 div.decompose()
 
-        # 2. 尋找精準內文標籤 (針對台灣校園常見的 CMS)
+        # 2. 尋找精準內文標籤
         specific_classes = ['m-edit', 'user_edit', 'article-content', 'news-content', 'CCms_Content', 'cg-desc', 'editor', 'app-article']
         content_div = None
         for cls in specific_classes:
             content_div = d_soup.find('div', class_=re.compile(cls, re.I))
             if content_div: break
             
-        # 3. 啟發式文字密度探測 (若找不到特定標籤)
         if not content_div:
             best_node = None
             max_score = 0
             for node in d_soup.find_all(['div', 'article', 'main']):
                 text_len = len(node.get_text(strip=True))
                 if text_len < 50: continue
-                # 計算連結文字比例，若大於 40% 代表這是目錄或側邊欄，直接剔除
                 link_len = sum(len(a.get_text(strip=True)) for a in node.find_all('a'))
                 if text_len > 0 and (link_len / text_len) > 0.4: continue 
                 
@@ -212,8 +209,14 @@ def get_news_content(url):
                     best_node = node
             content_div = best_node if best_node else d_soup.find('body')
 
-        # 4. 抽取純文字並進行最後的字典去雜訊
-        full_text = content_div.get_text(separator='\n', strip=True)
+        # 🌟 3. 智慧段落接合：只在特定區塊標籤後方加入換行，避免 inline 文字被切斷
+        for br in content_div.find_all(['br', 'hr']):
+            br.replace_with('\n')
+        for block in content_div.find_all(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr']):
+            block.append('\n')
+
+        # 抽出文字，使用空白分隔避免英文字黏合
+        full_text = content_div.get_text(separator=' ', strip=True)
         
         # 🌟 垃圾字元過濾黑名單
         garbage_words = [
@@ -228,14 +231,16 @@ def get_news_content(url):
         clean_lines = []
         for line in full_text.split('\n'):
             line_str = line.strip()
+            # 移除過多重複的空白 (讓句子更緊湊)
+            line_str = re.sub(r' +', ' ', line_str)
             if not line_str: continue
-            if line_str in garbage_words: continue # 命中垃圾字，直接刪除
+            if line_str in garbage_words: continue 
             if len(line_str) <= 3 and '::' in line_str: continue
             clean_lines.append(line_str)
             
         final_text = '\n'.join(clean_lines)
         
-        # 5. 抓取圖片
+        # 4. 抓取圖片
         img_urls = []
         for img in content_div.find_all('img'):
             src = img.get('src')
