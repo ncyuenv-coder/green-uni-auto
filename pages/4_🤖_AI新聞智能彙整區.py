@@ -28,7 +28,7 @@ if st.session_state.get("authentication_status") is not True:
 
 st.set_page_config(page_title="嘉大 AI 新聞智能彙整", page_icon="📰", layout="wide")
 
-# 🌟 初始化 Gemini AI 大腦 (升級為 2.5 Flash Lite)
+# 🌟 初始化 Gemini AI 大腦
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
@@ -70,7 +70,7 @@ def save_raw_to_db(record):
         ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
         row = [
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            record['題號'], record['中文標題'], record['新聞日期'],
+            str(record['題號']).strip(), str(record['中文標題']).strip(), record['新聞日期'],
             record['新聞標題'], record['原始內容'], "", 
             ",".join(record['照片清單']), record['新聞連結']
         ]
@@ -89,7 +89,7 @@ def delete_rows_from_db(row_indices):
 def update_q_ids_in_db(updates):
     try:
         ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
-        headers = ws.get_all_values()[0]
+        headers = [str(h).strip() for h in ws.get_all_values()[0]]
         q_id_col = headers.index('對應題號') + 1
         q_title_col = headers.index('中文標題') + 1
         cells = []
@@ -103,7 +103,7 @@ def update_q_ids_in_db(updates):
 def update_ai_summary_by_row(row_idx, ai_summary):
     try:
         ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
-        headers = ws.get_all_values()[0]
+        headers = [str(h).strip() for h in ws.get_all_values()[0]]
         ai_idx = headers.index('AI摘要') + 1
         ws.update_cell(row_idx, ai_idx, str(ai_summary))
         return True
@@ -166,7 +166,6 @@ def get_news_list(start_date, end_date):
         time.sleep(0.2)
     return news_list
 
-# 🌟 升級版：純淨內文萃取器 (照片說明文字終極抹除)
 def get_news_content(url):
     base_url = "https://www.ncyu.edu.tw"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -175,7 +174,6 @@ def get_news_content(url):
         d_req.encoding = 'utf-8'
         d_soup = BeautifulSoup(d_req.text, 'html.parser')
         
-        # 1. 暴力清除所有無關的 HTML 標籤
         for tag in d_soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
             tag.decompose()
             
@@ -186,7 +184,6 @@ def get_news_content(url):
             if noise_patterns.search(class_str) or noise_patterns.search(id_str):
                 div.decompose()
 
-        # 2. 尋找精準內文標籤
         specific_classes = ['m-edit', 'user_edit', 'article-content', 'news-content', 'CCms_Content', 'cg-desc', 'editor', 'app-article']
         content_div = None
         for cls in specific_classes:
@@ -209,16 +206,13 @@ def get_news_content(url):
                     best_node = node
             content_div = best_node if best_node else d_soup.find('body')
 
-        # 3. 智慧段落接合
         for br in content_div.find_all(['br', 'hr']):
             br.replace_with('\n')
         for block in content_div.find_all(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr']):
             block.append('\n')
 
-        # 抽出文字
         full_text = content_div.get_text(separator=' ', strip=True)
         
-        # 垃圾字元過濾黑名單
         garbage_words = [
             '國立嘉義大學', ':::', '回首頁', '網站導覽', '分眾導覽', '新生教務專欄', 
             '學生', '教師', '職員工', '校友', '民眾', '聯絡我們', 'ENGLISH', 
@@ -231,23 +225,18 @@ def get_news_content(url):
         clean_lines = []
         for line in full_text.split('\n'):
             line_str = line.strip()
-            line_str = re.sub(r' +', ' ', line_str) # 壓縮多餘空白
-            
-            # 強制抹除照片說明與版權文字
+            line_str = re.sub(r' +', ' ', line_str) 
             line_str = re.sub(r'[（\(][^）\)]*(照片|攝影|拍攝|提供)[^）\)]*[）\)]', '', line_str)
             line_str = re.sub(r'(?:^|\s)圖\s*\d+\s*[：:].*?(?:[）\)]|。|$)', '', line_str)
-            
             line_str = line_str.strip()
             
             if not line_str: continue
             if line_str in garbage_words: continue 
             if len(line_str) <= 3 and '::' in line_str: continue
-            
             clean_lines.append(line_str)
             
         final_text = '\n'.join(clean_lines)
         
-        # 4. 抓取圖片
         img_urls = []
         for img in content_div.find_all('img'):
             src = img.get('src')
@@ -407,7 +396,7 @@ with tab_scrape:
                     
                     for _, target in df_targets.iterrows():
                         q_id = str(target.get('題號', '')).strip()
-                        q_title = target.get('中文標題', '')
+                        q_title = str(target.get('中文標題', '')).strip()
                         raw_kw = str(target.get(kw_col, ''))
                         if not raw_kw.strip() or raw_kw.lower() == 'nan': raw_kw = q_title
                         keywords = [k.strip() for k in re.split(r'[、,，]', raw_kw) if k.strip()]
@@ -473,11 +462,14 @@ with tab_ai:
         st.error(f"⚠️ 您的《AI新聞資料庫》缺少必要的欄位標題：`{', '.join(missing)}`")
         st.info("👉 解決方法：請至 Google Sheet 確保第一列有以下 9 個欄位：\n\n`抓取時間`, `對應題號`, `中文標題`, `新聞日期`, `新聞標題`, `原始內容`, `AI摘要`, `照片清單`, `新聞連結`")
     else:
+        # 🌟 建立絕對對齊去空白的下拉選單 (確保完美對應)
         valid_q_list = []
         if not df_targets.empty:
             for _, r in df_targets.iterrows():
-                if str(r.get('題號', '')).strip():
-                    valid_q_list.append(f"{str(r['題號']).strip()} - {str(r.get('中文標題', '')).strip()}")
+                qid = str(r.get('題號', '')).strip()
+                qtitle = str(r.get('中文標題', '')).strip()
+                if qid:
+                    valid_q_list.append(f"{qid} - {qtitle}")
         
         df_ai_db['AI摘要'] = df_ai_db['AI摘要'].astype(str).str.strip()
         df_pending = df_ai_db[df_ai_db['AI摘要'] == ''].copy()
@@ -487,7 +479,8 @@ with tab_ai:
         else:
             df_pending['_row_idx'] = df_pending.index + 2
             
-            # 🌟 升級版：組合「題號 + 標題」放入下拉選單
+            # 🌟 強制去空白對齊
+            df_pending['對應題號'] = df_pending['對應題號'].astype(str).str.strip() + " - " + df_pending['中文標題'].astype(str).str.strip()
             df_pending['預覽選項'] = "【" + df_pending['對應題號'].astype(str) + "】" + df_pending['新聞標題'].astype(str)
             
             st.markdown("#### 👀 預覽新聞內文 (人工審核輔助)")
@@ -495,18 +488,16 @@ with tab_ai:
                 prev_sel = st.selectbox("選擇預覽新聞", df_pending['預覽選項'].tolist(), key="preview_sel")
                 if prev_sel:
                     prev_row = df_pending[df_pending['預覽選項'] == prev_sel].iloc[0]
-                    # 顯示當前對應的題目
-                    st.markdown(f"**🎯 預設對應題目：** {prev_row['對應題號']} - {prev_row['中文標題']}")
+                    st.markdown(f"**🎯 預設對應題目：** {prev_row['對應題號']}")
                     st.markdown(f"**🔗 原文連結：** [{prev_row['新聞連結']}]({prev_row['新聞連結']})")
                     st.markdown(f"<div class='raw-box'>{prev_row['原始內容']}</div>", unsafe_allow_html=True)
 
             st.markdown("---")
             st.markdown(f"#### 📝 待處理清單 (尚有 <span style='color:red;'>{len(df_pending)}</span> 筆)", unsafe_allow_html=True)
-            st.info("💡 您可以在表格內修改「對應題號」，或勾選「刪除」剔除無關新聞。確認無誤後，勾選「跑 AI」讓 Gemini 接手處理！")
+            st.info("💡 若您發現部分新聞跑到錯誤的題號，請先至《原始新聞抓取》檢查該題的「搜尋關鍵字」是否設定得太廣泛（例如只設定了「大學」或「計畫」）！您可以在下方表格直接修改正確的對應題號，或勾選刪除。")
             
             df_pending.insert(0, "🤖 跑 AI", False)
             df_pending.insert(1, "🗑️ 刪除", False)
-            df_pending['對應題號'] = df_pending['對應題號'].astype(str) + " - " + df_pending['中文標題'].astype(str)
             
             display_cols = ["🤖 跑 AI", "🗑️ 刪除", "對應題號", "新聞標題", "新聞日期", "新聞連結", "_row_idx"]
             
@@ -539,8 +530,9 @@ with tab_ai:
                                 orig_full_id = df_pending.loc[idx, '對應題號']
                                 new_full_id = row['對應題號']
                                 if orig_full_id != new_full_id:
-                                    new_id = new_full_id.split(" - ")[0]
-                                    new_title = new_full_id.split(" - ")[1]
+                                    # 🌟 確保切割後去空白
+                                    new_id = new_full_id.split(" - ")[0].strip()
+                                    new_title = new_full_id.split(" - ")[1].strip()
                                     updates.append({'row': row['_row_idx'], 'new_id': new_id, 'new_title': new_title})
                         
                         if updates: update_q_ids_in_db(updates)
@@ -564,7 +556,7 @@ with tab_ai:
                             for i, (_, row) in enumerate(ai_rows.iterrows()):
                                 real_row_idx = row['_row_idx']
                                 new_full_id = row['對應題號']
-                                target_title = new_full_id.split(" - ")[1]
+                                target_title = new_full_id.split(" - ")[1].strip()
                                 
                                 progress_text2.markdown(f"**✨ 處理中 ({i+1}/{len(ai_rows)})：** {row['新聞標題']}")
                                 bar2.progress((i + 1) / len(ai_rows))
