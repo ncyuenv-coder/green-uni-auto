@@ -32,7 +32,6 @@ st.set_page_config(page_title="嘉大 AI 新聞智能彙整", page_icon="📰", 
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
-    # 🚀 使用最新最快的輕量級模型，省時省額度
     ai_model = genai.GenerativeModel('gemini-2.5-flash-lite') 
 except Exception as e:
     st.error("⚠️ 無法載入 Gemini API Key，請確認 secrets.toml 設定！")
@@ -234,10 +233,8 @@ def get_news_content(url):
             line_str = line.strip()
             line_str = re.sub(r' +', ' ', line_str) # 壓縮多餘空白
             
-            # 🚀 新增：強制抹除照片說明與版權文字
-            # 抹除形如 "(照片由XXX提供)" 或 "（由XXX攝影）"
+            # 強制抹除照片說明與版權文字
             line_str = re.sub(r'[（\(][^）\)]*(照片|攝影|拍攝|提供)[^）\)]*[）\)]', '', line_str)
-            # 抹除形如 "圖1：植物醫學系..." 這種從圖號開始一直到句號或結尾的說明文字
             line_str = re.sub(r'(?:^|\s)圖\s*\d+\s*[：:].*?(?:[）\)]|。|$)', '', line_str)
             
             line_str = line_str.strip()
@@ -490,11 +487,16 @@ with tab_ai:
         else:
             df_pending['_row_idx'] = df_pending.index + 2
             
+            # 🌟 升級版：組合「題號 + 標題」放入下拉選單
+            df_pending['預覽選項'] = "【" + df_pending['對應題號'].astype(str) + "】" + df_pending['新聞標題'].astype(str)
+            
             st.markdown("#### 👀 預覽新聞內文 (人工審核輔助)")
             with st.expander("點此展開選擇要預覽的新聞，確認其內容是否符合題意", expanded=False):
-                prev_sel = st.selectbox("選擇預覽新聞", df_pending['新聞標題'].tolist(), key="preview_sel")
+                prev_sel = st.selectbox("選擇預覽新聞", df_pending['預覽選項'].tolist(), key="preview_sel")
                 if prev_sel:
-                    prev_row = df_pending[df_pending['新聞標題'] == prev_sel].iloc[0]
+                    prev_row = df_pending[df_pending['預覽選項'] == prev_sel].iloc[0]
+                    # 顯示當前對應的題目
+                    st.markdown(f"**🎯 預設對應題目：** {prev_row['對應題號']} - {prev_row['中文標題']}")
                     st.markdown(f"**🔗 原文連結：** [{prev_row['新聞連結']}]({prev_row['新聞連結']})")
                     st.markdown(f"<div class='raw-box'>{prev_row['原始內容']}</div>", unsafe_allow_html=True)
 
