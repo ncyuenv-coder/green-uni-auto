@@ -28,11 +28,12 @@ if st.session_state.get("authentication_status") is not True:
 
 st.set_page_config(page_title="嘉大 AI 新聞智能彙整", page_icon="📰", layout="wide")
 
-# 🌟 初始化 Gemini AI 大腦
+# 🌟 初始化 Gemini AI 大腦 (升級為 2.5 Flash Lite)
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
-    ai_model = genai.GenerativeModel('gemini-1.5-flash') 
+    # 🚀 使用最新最快的輕量級模型，省時省額度
+    ai_model = genai.GenerativeModel('gemini-2.5-flash-lite') 
 except Exception as e:
     st.error("⚠️ 無法載入 Gemini API Key，請確認 secrets.toml 設定！")
     st.stop()
@@ -166,7 +167,7 @@ def get_news_list(start_date, end_date):
         time.sleep(0.2)
     return news_list
 
-# 🌟 升級版：純淨內文萃取器 (流暢段落接合)
+# 🌟 升級版：純淨內文萃取器 (照片說明文字終極抹除)
 def get_news_content(url):
     base_url = "https://www.ncyu.edu.tw"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -209,16 +210,16 @@ def get_news_content(url):
                     best_node = node
             content_div = best_node if best_node else d_soup.find('body')
 
-        # 🌟 3. 智慧段落接合：只在特定區塊標籤後方加入換行，避免 inline 文字被切斷
+        # 3. 智慧段落接合
         for br in content_div.find_all(['br', 'hr']):
             br.replace_with('\n')
         for block in content_div.find_all(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr']):
             block.append('\n')
 
-        # 抽出文字，使用空白分隔避免英文字黏合
+        # 抽出文字
         full_text = content_div.get_text(separator=' ', strip=True)
         
-        # 🌟 垃圾字元過濾黑名單
+        # 垃圾字元過濾黑名單
         garbage_words = [
             '國立嘉義大學', ':::', '回首頁', '網站導覽', '分眾導覽', '新生教務專欄', 
             '學生', '教師', '職員工', '校友', '民眾', '聯絡我們', 'ENGLISH', 
@@ -231,11 +232,20 @@ def get_news_content(url):
         clean_lines = []
         for line in full_text.split('\n'):
             line_str = line.strip()
-            # 移除過多重複的空白 (讓句子更緊湊)
-            line_str = re.sub(r' +', ' ', line_str)
+            line_str = re.sub(r' +', ' ', line_str) # 壓縮多餘空白
+            
+            # 🚀 新增：強制抹除照片說明與版權文字
+            # 抹除形如 "(照片由XXX提供)" 或 "（由XXX攝影）"
+            line_str = re.sub(r'[（\(][^）\)]*(照片|攝影|拍攝|提供)[^）\)]*[）\)]', '', line_str)
+            # 抹除形如 "圖1：植物醫學系..." 這種從圖號開始一直到句號或結尾的說明文字
+            line_str = re.sub(r'(?:^|\s)圖\s*\d+\s*[：:].*?(?:[）\)]|。|$)', '', line_str)
+            
+            line_str = line_str.strip()
+            
             if not line_str: continue
             if line_str in garbage_words: continue 
             if len(line_str) <= 3 and '::' in line_str: continue
+            
             clean_lines.append(line_str)
             
         final_text = '\n'.join(clean_lines)
