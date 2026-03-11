@@ -30,9 +30,14 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 if st.session_state.get("authentication_status") is not True:
     st.warning("⚠️ 請先至首頁登入系統！"); st.stop()
 
+# 🛡️ [修改 1] 僅限 admin_ui 檢視與管理
+if st.session_state.get("username") != "admin_ui":
+    st.error("🚫 權限不足！此頁面僅限系統管理員 (admin_ui) 存取。")
+    st.stop()
+
 st.set_page_config(page_title="嘉大 AI 新聞智能彙整", page_icon="📰", layout="wide")
 
-# 📂 新聞照片存放的 Google Drive 資料夾 ID (已更新為真實 ID)
+# 📂 新聞照片存放的 Google Drive 資料夾 ID
 NEWS_IMG_FOLDER_ID = "1VNOna4gRdtTIiFPc4XqMJU2jP01LcyXM" 
 
 # 🌟 初始化 Gemini AI 大腦
@@ -425,17 +430,23 @@ with tab_scrape:
     with c_start: start_date = st.date_input("新聞起日", datetime.date(2024, 1, 1))
     with c_end: end_date = st.date_input("新聞迄日", datetime.date.today())
     
-    st.info("💡 **【免耗額度】** 系統將掃描此區間內的新聞，擷取全文並將所有附圖進行無損壓縮後上傳至 Google Drive，最後寫入資料庫保存。")
+    st.info("💡 **【智慧跳過機制】** 系統會自動比對資料庫，如果該篇新聞已經存在於對應的題號中，爬蟲就會自動跳過，不會重複浪費時間下載！")
     
     if st.button("🕷️ 開始啟動關鍵字爬取與照片儲存", type="secondary", use_container_width=True):
         with st.spinner("🤖 正在掃描並陸續寫入資料庫，請稍候..."):
             df_targets = load_sheet("原始新聞抓取")
             df_existing = load_sheet("AI新聞資料庫")
             
+            # [修改 2] 更精準的 existing_set 比對邏輯
             existing_set = set()
             if not df_existing.empty and '對應題號' in df_existing.columns and '新聞連結' in df_existing.columns:
                 for _, r in df_existing.iterrows():
-                    existing_set.add(f"{str(r.get('對應題號','')).strip()}_{str(r.get('新聞連結','')).strip()}")
+                    row_id = str(r.get('對應題號','')).strip()
+                    # 處理可能有多個題號的情況 (以逗號、斜線等分隔)
+                    ids = [x.strip() for x in re.split(r'[,、/，\s]+', row_id) if x.strip()]
+                    link = str(r.get('新聞連結','')).strip()
+                    for i in ids:
+                        existing_set.add(f"{i}_{link}")
             
             if df_targets.empty:
                 st.error("❌ 找不到《原始新聞抓取》工作表，或表內無資料！")
@@ -449,6 +460,7 @@ with tab_scrape:
                     st.toast(f"✅ 成功獲取 {len(basic_news_list)} 篇新聞，準備進行比對與圖文入庫...", icon="🎯")
                     
                     matched_tasks = []
+                    skipped_count = 0
                     kw_col = '搜尋關鍵字或判斷準則' if '搜尋關鍵字或判斷準則' in df_targets.columns else '關鍵字或判斷準則'
                     
                     for _, target in df_targets.iterrows():
@@ -465,13 +477,20 @@ with tab_scrape:
                             for kw in keywords:
                                 clean_kw = re.sub(r'\s+', '', kw).lower()
                                 if clean_kw and clean_kw in clean_title:
-                                    if f"{q_id}_{news['新聞連結']}" not in existing_set:
+                                    check_key = f"{q_id}_{news['新聞連結']}"
+                                    if check_key not in existing_set:
                                         matched_tasks.append({'q_id': q_id, 'q_title': q_title, 'news': news})
+                                        # 避免同一次爬蟲中同一篇新聞被同一個題目的多個關鍵字重複加入
+                                        existing_set.add(check_key)
+                                    else:
+                                        skipped_count += 1
                                     break
                     
                     if not matched_tasks:
-                        st.success("🎉 所有符合關鍵字的新聞都已經在資料庫中了，沒有需要新增的新聞！")
+                        st.success(f"🎉 所有符合關鍵字的新聞都已經在資料庫中了 (本次自動跳過了 {skipped_count} 筆已存在的紀錄)！")
                     else:
+                        st.info(f"💡 共比對出 {len(matched_tasks) + skipped_count} 筆符合的新聞，其中 {skipped_count} 筆已存在 (自動跳過)，實際將擷取 {len(matched_tasks)} 筆。")
+                        
                         success_count = 0
                         total_tasks = len(matched_tasks)
                         progress_text = st.empty()
@@ -509,7 +528,7 @@ with tab_scrape:
                                     
                         progress_text.empty()
                         my_bar.empty()
-                        st.success(f"🎉 爬蟲作業完成！成功擷取 {success_count} 筆新聞與圖片，請前往「階段二」進行人工審核與改寫。")
+                        st.success(f"🎉 爬蟲作業完成！成功新增擷取 {success_count} 筆新聞與圖片，請前往「階段二」進行人工審核與改寫。")
 
 # ==========================================
 # 🔍 階段二：人工審核與 Gemini 智慧改寫 (並排佈局)
@@ -546,7 +565,7 @@ with tab_ai:
             df_pending['對應題號'] = df_pending['對應題號'].astype(str).str.strip() + " - " + df_pending['中文標題'].astype(str).str.strip()
             df_pending['預覽選項'] = "【" + df_pending['對應題號'].astype(str) + "】" + df_pending['新聞標題'].astype(str)
             
-            # 🌟 改為左右並排設計 (左 4：右 6)
+            # 🌟 左右並排設計 (左 4：右 6)
             col_preview, col_list = st.columns([4, 6])
             
             with col_preview:
