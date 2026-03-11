@@ -21,12 +21,12 @@ authenticator = stauth.Authenticate(
 )
 
 # ==========================================
-# 共用元件：滿版橫幅資訊卡模板 (HTML/CSS)
+# 共用元件：滿版橫幅資訊卡模板 (清爽淺色版)
 # ==========================================
 banner_html = """
-<div style='background-color: #2C3E50; padding: 40px 20px; border-radius: 15px; text-align: center; box-shadow: 0 8px 16px rgba(0,0,0,0.15); margin-bottom: 40px;'>
-    <h1 style='color: #FFFFFF; margin-bottom: 10px; font-weight: 900; letter-spacing: 1px;'>🌱 國立嘉義大學綠色大學評比資料填報及彙整平台</h1>
-    <h3 style='color: #AED6F1; margin-top: 0; font-weight: 500;'>National Chiayi University UI GreenMetric Data Collection and Integration Platform</h3>
+<div style='background-color: #FFFFFF; padding: 40px 20px; border-radius: 12px; border: 1px solid #E5E8E8; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 40px; text-align: center;'>
+    <h1 style='color: #2C3E50; margin-bottom: 10px; font-weight: 900; letter-spacing: 1px;'>🌱 國立嘉義大學綠色大學評比資料填報及彙整平台</h1>
+    <h3 style='color: #7F8C8D; margin-top: 0; font-weight: 500;'>National Chiayi University UI GreenMetric Data Collection and Integration Platform</h3>
 </div>
 """
 
@@ -35,7 +35,7 @@ if st.session_state.get("authentication_status") is None or st.session_state.get
     # --- 未登入或登入失敗的畫面 ---
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # [修改 1] 登入頁面：套用滿版橫幅資訊卡
+    # 登入頁面：套用淺色滿版橫幅資訊卡
     st.markdown(banner_html, unsafe_allow_html=True)
     
     # 將登入框維持在畫面正中央 (調整比例)
@@ -52,15 +52,15 @@ elif st.session_state.get("authentication_status") is True:
     # --- 登入成功的畫面 ---
     username = st.session_state["username"]
     
-    # 側邊欄：僅保留帳號資訊與登出按鈕 (已刪除手寫的系統導覽選單)
+    # 側邊欄：僅保留帳號資訊與登出按鈕
     st.sidebar.title(f"👤 歡迎, {st.session_state['name']}")
     authenticator.logout("登出", "sidebar")
     st.sidebar.markdown("---")
     
-    # [修改 2] 首頁：套用滿版橫幅資訊卡
+    # 首頁：套用淺色滿版橫幅資訊卡
     st.markdown(banner_html, unsafe_allow_html=True)
     
-    # [修改 3] 歡迎語及說明文字卡片
+    # 歡迎語及說明文字卡片
     st.markdown("""
     <div style='background-color: #EBF5FB; padding: 30px; border-radius: 12px; border-left: 8px solid #3498DB; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px;'>
         <h3 style='color: #2C3E50; margin-top: 0;'>👋 您好！歡迎來到本校「綠色大學評比資料填報及彙整平台」</h3>
