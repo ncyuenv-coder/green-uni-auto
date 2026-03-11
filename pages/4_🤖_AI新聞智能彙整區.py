@@ -7,9 +7,13 @@ import requests
 import re
 import time
 import urllib3
+import base64
 from bs4 import BeautifulSoup
+from PIL import Image
 import google.generativeai as genai
 from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from docx import Document
 from docx.shared import Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -27,6 +31,9 @@ if st.session_state.get("authentication_status") is not True:
     st.warning("⚠️ 請先至首頁登入系統！"); st.stop()
 
 st.set_page_config(page_title="嘉大 AI 新聞智能彙整", page_icon="📰", layout="wide")
+
+# 📂 新聞照片存放的 Google Drive 資料夾 ID (請修改為您的真實 ID)
+NEWS_IMG_FOLDER_ID = "1VNOna4gRdtTIiFPc4XqMJU2jP01LcyXM" 
 
 # 🌟 初始化 Gemini AI 大腦
 try:
@@ -49,12 +56,12 @@ st.markdown("""
     div.stButton > button[kind="secondary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.3em !important; padding: 12px 30px !important; background-color: #8FAAB8 !important; color: white !important; border: none !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     div.stButton > button[kind="secondary"]:hover { background-color: #738A96 !important; }
     [data-testid="stDownloadButton"] button { background-color: #D4A373 !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: bold !important; font-size: 1.3em !important; padding: 12px 24px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .raw-box { background-color: #FDF6E3; padding: 20px; border-left: 5px solid #E6C27A; border-radius: 6px; height: 300px; overflow-y: auto; line-height: 1.8; font-size: 1.1em; color: #333;}
+    .raw-box { background-color: #FDF6E3; padding: 20px; border-left: 5px solid #E6C27A; border-radius: 6px; height: 500px; overflow-y: auto; line-height: 1.8; font-size: 1.1em; color: #333;}
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🔌 資料庫連線與精準讀寫引擎
+# 🔌 資料庫連線與 Google Drive API
 # ==========================================
 @st.cache_resource
 def get_gcp_credentials():
@@ -110,8 +117,34 @@ def update_ai_summary_by_row(row_idx, ai_summary):
     except Exception: return False
 
 # ==========================================
-# 🕷️ 爬蟲引擎
+# 🕸️ 爬蟲引擎與圖片上傳模組
 # ==========================================
+def download_compress_upload_image(img_url, drive_service, file_name_prefix):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        req = requests.get(img_url, headers=headers, timeout=10, verify=False)
+        req.raise_for_status()
+        img_bytes = req.content
+
+        # 無損壓縮邏輯
+        img = Image.open(io.BytesIO(img_bytes))
+        if img.mode in ("RGBA", "P"): img = img.convert("RGB")
+        out_io = io.BytesIO()
+        img.save(out_io, format='JPEG', optimize=True, quality=85)
+        out_io.seek(0)
+
+        # 防呆：如果壓縮後反而變大，就用原檔
+        if len(out_io.getvalue()) > len(img_bytes):
+            out_io = io.BytesIO(img_bytes)
+
+        # 寫入 Google Drive
+        file_meta = {'name': f"{file_name_prefix}.jpg", 'parents': [NEWS_IMG_FOLDER_ID]}
+        media = MediaIoBaseUpload(out_io, mimetype='image/jpeg', resumable=True)
+        file = drive_service.files().create(body=file_meta, media_body=media, fields='id').execute()
+        return file.get('id')
+    except Exception as e:
+        return None
+
 def get_news_list(start_date, end_date):
     base_url = "https://www.ncyu.edu.tw"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -271,14 +304,26 @@ def process_news_with_ai(news_item, q_title):
     except Exception: return f"AI 處理失敗"
 
 # ==========================================
-# 🌟 Word 產製引擎
+# 🌟 Drive 讀取與 Word 產製引擎
 # ==========================================
-def url_to_bytes(url):
+def drive_id_to_bytes(file_id):
     try:
-        req = requests.get(url, timeout=5, verify=False)
-        req.raise_for_status()
-        return io.BytesIO(req.content)
+        creds = get_gcp_credentials()
+        drive_service = build('drive', 'v3', credentials=creds)
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done: status, done = downloader.next_chunk()
+        fh.seek(0)
+        return fh
     except: return None
+
+def get_drive_image_b64(file_id):
+    fh = drive_id_to_bytes(file_id)
+    if fh:
+        return base64.b64encode(fh.read()).decode('utf-8')
+    return ""
 
 def format_report_text_to_html(text):
     text = str(text)
@@ -306,15 +351,16 @@ def generate_ai_word_report(q_id, q_title, news_records):
         doc.add_heading(f"新聞標題：{record['新聞標題']}", level=2)
         p_date = doc.add_paragraph(); p_date.add_run(f"發布日期：{record['新聞日期']}").italic = True
         
-        urls = str(record['照片清單']).split(',') if record['照片清單'] else []
-        urls = [u for u in urls if u.strip()]
-        if urls:
+        file_ids = str(record['照片清單']).split(',') if record['照片清單'] else []
+        file_ids = [fid.strip() for fid in file_ids if fid.strip()]
+        
+        if file_ids:
             table = doc.add_table(rows=0, cols=2); table.style = 'Table Grid'
-            for i in range(0, len(urls), 2):
+            for i in range(0, len(file_ids), 2):
                 row = table.add_row()
                 c1 = row.cells[0]; c1.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 p1 = c1.paragraphs[0]; p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                img_b1 = url_to_bytes(urls[i])
+                img_b1 = drive_id_to_bytes(file_ids[i])
                 if img_b1: 
                     try: p1.add_run().add_picture(img_b1, width=Cm(7.5))
                     except: p1.add_run("(圖檔格式不支援)")
@@ -322,12 +368,13 @@ def generate_ai_word_report(q_id, q_title, news_records):
                 
                 c2 = row.cells[1]; c2.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 p2 = c2.paragraphs[0]; p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                if i + 1 < len(urls):
-                    img_b2 = url_to_bytes(urls[i+1])
+                if i + 1 < len(file_ids):
+                    img_b2 = drive_id_to_bytes(file_ids[i+1])
                     if img_b2: 
                         try: p2.add_run().add_picture(img_b2, width=Cm(7.5))
                         except: p2.add_run("(圖檔格式不支援)")
                     else: p2.add_run("(圖載入失敗)")
+                    
         doc.add_paragraph()
         for line in str(record['AI摘要']).replace('\r', '').split('\n'):
             line = line.strip()
@@ -368,9 +415,9 @@ with tab_scrape:
     with c_start: start_date = st.date_input("新聞起日", datetime.date(2024, 1, 1))
     with c_end: end_date = st.date_input("新聞迄日", datetime.date.today())
     
-    st.info("💡 **【免耗額度】** 系統將掃描此區間內的新聞標題，命中關鍵字後抓取內文並「陸續寫入」資料庫保存。")
+    st.info("💡 **【免耗額度】** 系統將掃描此區間內的新聞，擷取全文並將所有附圖進行無損壓縮後上傳至 Google Drive，最後寫入資料庫保存。")
     
-    if st.button("🕷️ 開始啟動關鍵字爬取與入庫", type="secondary", use_container_width=True):
+    if st.button("🕷️ 開始啟動關鍵字爬取與照片儲存", type="secondary", use_container_width=True):
         with st.spinner("🤖 正在掃描並陸續寫入資料庫，請稍候..."):
             df_targets = load_sheet("原始新聞抓取")
             df_existing = load_sheet("AI新聞資料庫")
@@ -389,7 +436,7 @@ with tab_scrape:
                 if not basic_news_list:
                     st.warning(f"在 {start_date} 至 {end_date} 區間內未抓取到任何新聞。")
                 else:
-                    st.toast(f"✅ 成功獲取 {len(basic_news_list)} 篇新聞，準備進行比對與入庫...", icon="🎯")
+                    st.toast(f"✅ 成功獲取 {len(basic_news_list)} 篇新聞，準備進行比對與圖文入庫...", icon="🎯")
                     
                     matched_tasks = []
                     kw_col = '搜尋關鍵字或判斷準則' if '搜尋關鍵字或判斷準則' in df_targets.columns else '關鍵字或判斷準則'
@@ -420,20 +467,30 @@ with tab_scrape:
                         progress_text = st.empty()
                         my_bar = st.progress(0)
                         
+                        # 初始化 Drive 服務以供上傳圖片使用
+                        drive_service = build('drive', 'v3', credentials=get_gcp_credentials())
+                        
                         for i, task in enumerate(matched_tasks):
                             q_id = task['q_id']
                             news_title = task['news']['新聞標題']
                             
-                            progress_text.markdown(f"**📥 ({i+1}/{total_tasks}) 寫入中：** 題目 {q_id} v.s. 「{news_title}」")
+                            progress_text.markdown(f"**📥 ({i+1}/{total_tasks}) 擷取與壓縮圖片中：** 題目 {q_id} v.s. 「{news_title}」")
                             my_bar.progress((i + 1) / total_tasks)
                             
                             detail = get_news_content(task['news']['新聞連結'])
                             full_news = {**task['news'], **detail}
                             
+                            # 下載並壓縮所有附圖，取得 Drive IDs
+                            uploaded_file_ids = []
+                            for img_idx, img_url in enumerate(full_news['照片清單']):
+                                clean_name_prefix = f"News_{q_id}_{re.sub(r'[/\\:*?\"<>|]', '', news_title)[:15]}_{img_idx+1}"
+                                fid = download_compress_upload_image(img_url, drive_service, clean_name_prefix)
+                                if fid: uploaded_file_ids.append(fid)
+                            
                             record = {
                                 '題號': q_id, '中文標題': task['q_title'], '新聞日期': full_news['新聞日期'],
                                 '新聞標題': full_news['新聞標題'], '原始內容': full_news['原始內容'],
-                                '照片清單': full_news['照片清單'], '新聞連結': full_news['新聞連結']
+                                '照片清單': uploaded_file_ids, '新聞連結': full_news['新聞連結']
                             }
                             
                             if save_raw_to_db(record):
@@ -442,10 +499,10 @@ with tab_scrape:
                                     
                         progress_text.empty()
                         my_bar.empty()
-                        st.success(f"🎉 爬蟲作業完成！成功為資料庫新增了 {success_count} 筆原始新聞紀錄，請前往「階段二」進行人工審核與 AI 改寫。")
+                        st.success(f"🎉 爬蟲作業完成！成功擷取 {success_count} 筆新聞與圖片，請前往「階段二」進行人工審核與改寫。")
 
 # ==========================================
-# 🔍 階段二：人工審核與 Gemini 智慧改寫
+# 🔍 階段二：人工審核與 Gemini 智慧改寫 (並排佈局)
 # ==========================================
 with tab_ai:
     st.markdown("<div class='morandi-dark-title'>🔍 第二階段：人工審核與 AI 智慧改寫</div>", unsafe_allow_html=True)
@@ -460,9 +517,7 @@ with tab_ai:
     elif not all(col in df_ai_db.columns for col in required_cols):
         missing = [col for col in required_cols if col not in df_ai_db.columns]
         st.error(f"⚠️ 您的《AI新聞資料庫》缺少必要的欄位標題：`{', '.join(missing)}`")
-        st.info("👉 解決方法：請至 Google Sheet 確保第一列有以下 9 個欄位：\n\n`抓取時間`, `對應題號`, `中文標題`, `新聞日期`, `新聞標題`, `原始內容`, `AI摘要`, `照片清單`, `新聞連結`")
     else:
-        # 🌟 建立絕對對齊去空白的下拉選單 (確保完美對應)
         valid_q_list = []
         if not df_targets.empty:
             for _, r in df_targets.iterrows():
@@ -478,104 +533,100 @@ with tab_ai:
             st.success("🎉 太棒了！資料庫中所有新聞都已經完成 AI 摘要改寫囉！")
         else:
             df_pending['_row_idx'] = df_pending.index + 2
-            
-            # 🌟 強制去空白對齊
             df_pending['對應題號'] = df_pending['對應題號'].astype(str).str.strip() + " - " + df_pending['中文標題'].astype(str).str.strip()
             df_pending['預覽選項'] = "【" + df_pending['對應題號'].astype(str) + "】" + df_pending['新聞標題'].astype(str)
             
-            st.markdown("#### 👀 預覽新聞內文 (人工審核輔助)")
-            with st.expander("點此展開選擇要預覽的新聞，確認其內容是否符合題意", expanded=False):
-                prev_sel = st.selectbox("選擇預覽新聞", df_pending['預覽選項'].tolist(), key="preview_sel")
+            # 🌟 改為左右並排設計 (左 4：右 6)
+            col_preview, col_list = st.columns([4, 6])
+            
+            with col_preview:
+                st.markdown("#### 👀 預覽新聞內文 (人工審核輔助)")
+                prev_sel = st.selectbox("選擇下方清單中的新聞進行預覽", df_pending['預覽選項'].tolist(), key="preview_sel")
                 if prev_sel:
                     prev_row = df_pending[df_pending['預覽選項'] == prev_sel].iloc[0]
-                    st.markdown(f"**🎯 預設對應題目：** {prev_row['對應題號']}")
+                    st.markdown(f"**🎯 預設題號：** {prev_row['對應題號']}")
                     st.markdown(f"**🔗 原文連結：** [{prev_row['新聞連結']}]({prev_row['新聞連結']})")
                     st.markdown(f"<div class='raw-box'>{prev_row['原始內容']}</div>", unsafe_allow_html=True)
 
-            st.markdown("---")
-            st.markdown(f"#### 📝 待處理清單 (尚有 <span style='color:red;'>{len(df_pending)}</span> 筆)", unsafe_allow_html=True)
-            st.info("💡 若您發現部分新聞跑到錯誤的題號，請先至《原始新聞抓取》檢查該題的「搜尋關鍵字」是否設定得太廣泛（例如只設定了「大學」或「計畫」）！您可以在下方表格直接修改正確的對應題號，或勾選刪除。")
-            
-            df_pending.insert(0, "🤖 跑 AI", False)
-            df_pending.insert(1, "🗑️ 刪除", False)
-            
-            display_cols = ["🤖 跑 AI", "🗑️ 刪除", "對應題號", "新聞標題", "新聞日期", "新聞連結", "_row_idx"]
-            
-            edited_df = st.data_editor(
-                df_pending[display_cols],
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "🤖 跑 AI": st.column_config.CheckboxColumn("🤖 跑 AI", default=False),
-                    "🗑️ 刪除": st.column_config.CheckboxColumn("🗑️ 刪除", default=False),
-                    "對應題號": st.column_config.SelectboxColumn("對應題號 (點擊可換題)", options=valid_q_list, required=True),
-                    "新聞連結": st.column_config.LinkColumn("連結"),
-                    "_row_idx": None
-                },
-                disabled=["新聞標題", "新聞日期", "新聞連結"]
-            )
-            
-            st.write("")
-            c_save, c_space, c_ai = st.columns([4, 1, 4])
-            
-            with c_save:
-                if st.button("💾 僅儲存題號異動與刪除清單", type="secondary", use_container_width=True):
-                    with st.spinner("正在處理資料庫異動..."):
-                        del_rows = edited_df[edited_df['🗑️ 刪除']]['_row_idx'].tolist()
-                        if del_rows: delete_rows_from_db(del_rows)
-                            
-                        updates = []
-                        for idx, row in edited_df.iterrows():
-                            if not row['🗑️ 刪除']:
-                                orig_full_id = df_pending.loc[idx, '對應題號']
-                                new_full_id = row['對應題號']
-                                if orig_full_id != new_full_id:
-                                    # 🌟 確保切割後去空白
-                                    new_id = new_full_id.split(" - ")[0].strip()
-                                    new_title = new_full_id.split(" - ")[1].strip()
-                                    updates.append({'row': row['_row_idx'], 'new_id': new_id, 'new_title': new_title})
-                        
-                        if updates: update_q_ids_in_db(updates)
-                            
-                        st.success("✅ 異動與刪除已儲存！")
-                        time.sleep(1)
-                        st.rerun()
+            with col_list:
+                st.markdown(f"#### 📝 待處理清單 (尚有 <span style='color:red;'>{len(df_pending)}</span> 筆)", unsafe_allow_html=True)
+                st.info("💡 確認新聞內容無誤後，勾選最左側的「🤖 跑 AI」，並點擊下方執行按鈕。若新聞與題目無關，可直接勾選「🗑️ 刪除」。")
+                
+                df_pending.insert(0, "🤖 跑 AI", False)
+                df_pending.insert(1, "🗑️ 刪除", False)
+                
+                display_cols = ["🤖 跑 AI", "🗑️ 刪除", "對應題號", "新聞標題", "新聞日期", "新聞連結", "_row_idx"]
+                
+                edited_df = st.data_editor(
+                    df_pending[display_cols],
+                    hide_index=True,
+                    use_container_width=True,
+                    height=400,
+                    column_config={
+                        "🤖 跑 AI": st.column_config.CheckboxColumn("🤖 跑 AI", default=False),
+                        "🗑️ 刪除": st.column_config.CheckboxColumn("🗑️ 刪除", default=False),
+                        "對應題號": st.column_config.SelectboxColumn("對應題號 (點擊可換題)", options=valid_q_list, required=True),
+                        "新聞連結": st.column_config.LinkColumn("連結"),
+                        "_row_idx": None
+                    },
+                    disabled=["新聞標題", "新聞日期", "新聞連結"]
+                )
+                
+                c_save, c_ai = st.columns([1, 1])
+                
+                with c_save:
+                    if st.button("💾 儲存題號異動與刪除", type="secondary", use_container_width=True):
+                        with st.spinner("處理中..."):
+                            del_rows = edited_df[edited_df['🗑️ 刪除']]['_row_idx'].tolist()
+                            if del_rows: delete_rows_from_db(del_rows)
+                                
+                            updates = []
+                            for idx, row in edited_df.iterrows():
+                                if not row['🗑️ 刪除']:
+                                    orig_full_id = df_pending.loc[idx, '對應題號']
+                                    new_full_id = row['對應題號']
+                                    if orig_full_id != new_full_id:
+                                        new_id = new_full_id.split(" - ")[0].strip()
+                                        new_title = new_full_id.split(" - ")[1].strip()
+                                        updates.append({'row': row['_row_idx'], 'new_id': new_id, 'new_title': new_title})
+                            if updates: update_q_ids_in_db(updates)
+                            st.success("✅ 異動儲存完畢！"); time.sleep(1); st.rerun()
 
-            with c_ai:
-                if st.button("🚀 啟動 Gemini 智慧改寫已勾選項目", type="primary", use_container_width=True):
-                    ai_rows = edited_df[(edited_df['🤖 跑 AI']) & (~edited_df['🗑️ 刪除'])]
-                    
-                    if ai_rows.empty:
-                        st.warning("請先勾選至少一筆要「跑 AI」的新聞！")
-                    else:
-                        with st.spinner(f"正在呼叫 Gemini 處理 {len(ai_rows)} 筆新聞，請稍候..."):
-                            success_ai = 0
-                            progress_text2 = st.empty()
-                            bar2 = st.progress(0)
-                            
-                            for i, (_, row) in enumerate(ai_rows.iterrows()):
-                                real_row_idx = row['_row_idx']
-                                new_full_id = row['對應題號']
-                                target_title = new_full_id.split(" - ")[1].strip()
+                with c_ai:
+                    if st.button("🚀 啟動 Gemini 智慧改寫", type="primary", use_container_width=True):
+                        ai_rows = edited_df[(edited_df['🤖 跑 AI']) & (~edited_df['🗑️ 刪除'])]
+                        
+                        if ai_rows.empty:
+                            st.warning("請先勾選至少一筆要「跑 AI」的新聞！")
+                        else:
+                            with st.spinner(f"呼叫 Gemini 處理 {len(ai_rows)} 筆新聞中..."):
+                                success_ai = 0
+                                progress_text2 = st.empty()
+                                bar2 = st.progress(0)
                                 
-                                progress_text2.markdown(f"**✨ 處理中 ({i+1}/{len(ai_rows)})：** {row['新聞標題']}")
-                                bar2.progress((i + 1) / len(ai_rows))
-                                
-                                full_content = df_pending[df_pending['_row_idx'] == real_row_idx].iloc[0]['原始內容']
-                                news_item = {'新聞標題': row['新聞標題'], '原始內容': full_content}
-                                
-                                ai_summary = process_news_with_ai(news_item, target_title)
-                                
-                                if update_ai_summary_by_row(real_row_idx, ai_summary):
-                                    success_ai += 1
+                                for i, (_, row) in enumerate(ai_rows.iterrows()):
+                                    real_row_idx = row['_row_idx']
+                                    new_full_id = row['對應題號']
+                                    target_title = new_full_id.split(" - ")[1].strip()
                                     
+                                    progress_text2.markdown(f"**✨ 處理中 ({i+1}/{len(ai_rows)})：** {row['新聞標題']}")
+                                    bar2.progress((i + 1) / len(ai_rows))
+                                    
+                                    full_content = df_pending[df_pending['_row_idx'] == real_row_idx].iloc[0]['原始內容']
+                                    news_item = {'新聞標題': row['新聞標題'], '原始內容': full_content}
+                                    
+                                    ai_summary = process_news_with_ai(news_item, target_title)
+                                    
+                                    if update_ai_summary_by_row(real_row_idx, ai_summary):
+                                        success_ai += 1
+                                        
+                                    time.sleep(1.5)
+                                    
+                                progress_text2.empty()
+                                bar2.empty()
+                                st.success(f"🎉 完成！成功生成 {success_ai} 筆新聞摘要！請前往「階段三」檢視。")
                                 time.sleep(1.5)
-                                
-                            progress_text2.empty()
-                            bar2.empty()
-                            st.success(f"🎉 完成！成功生成並寫入了 {success_ai} 筆新聞摘要！請前往「階段三」檢視與下載。")
-                            time.sleep(1.5)
-                            st.rerun()
+                                st.rerun()
 
 # ==========================================
 # 📥 階段三：檢視與下載彙整區
@@ -619,16 +670,26 @@ with tab_view:
                     st.markdown(f"#### 📰 新聞標題：{row['新聞標題']}")
                     st.caption(f"📅 發布日期：{row['新聞日期']}")
                     
-                    urls = str(row.get('照片清單', '')).split(',')
-                    urls = [u for u in urls if u.strip()]
+                    # 讀取 Drive IDs 並轉換為網頁可顯示的 Base64 圖片
+                    file_ids = str(row.get('照片清單', '')).split(',')
+                    file_ids = [fid.strip() for fid in file_ids if fid.strip()]
                     
-                    if urls:
+                    if file_ids:
                         table_html = "<table style='width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #D9E0E3; background-color:white; margin-bottom: 20px;'>"
-                        for i in range(0, len(urls), 2):
+                        for i in range(0, len(file_ids), 2):
                             table_html += "<tr>"
-                            table_html += f"<td style='border:1px solid #D9E0E3; padding:10px; text-align:center; width:50%; vertical-align:middle;'><img src='{urls[i]}' style='width:100%; max-height:300px; object-fit:contain; border-radius:8px;'></td>"
-                            if i + 1 < len(urls):
-                                table_html += f"<td style='border:1px solid #D9E0E3; padding:10px; text-align:center; width:50%; vertical-align:middle;'><img src='{urls[i+1]}' style='width:100%; max-height:300px; object-fit:contain; border-radius:8px;'></td>"
+                            b64_img1 = get_drive_image_b64(file_ids[i])
+                            if b64_img1:
+                                table_html += f"<td style='border:1px solid #D9E0E3; padding:10px; text-align:center; width:50%; vertical-align:middle;'><img src='data:image/jpeg;base64,{b64_img1}' style='width:100%; max-height:300px; object-fit:contain; border-radius:8px;'></td>"
+                            else:
+                                table_html += "<td style='border:1px solid #D9E0E3; width:50%; text-align:center;'>圖片載入失敗</td>"
+                                
+                            if i + 1 < len(file_ids):
+                                b64_img2 = get_drive_image_b64(file_ids[i+1])
+                                if b64_img2:
+                                    table_html += f"<td style='border:1px solid #D9E0E3; padding:10px; text-align:center; width:50%; vertical-align:middle;'><img src='data:image/jpeg;base64,{b64_img2}' style='width:100%; max-height:300px; object-fit:contain; border-radius:8px;'></td>"
+                                else:
+                                    table_html += "<td style='border:1px solid #D9E0E3; width:50%; text-align:center;'>圖片載入失敗</td>"
                             else:
                                 table_html += "<td style='border:1px solid #D9E0E3; width:50%;'></td>"
                             table_html += "</tr>"
@@ -649,7 +710,7 @@ with tab_view:
                     
                     records_to_print.append({
                         '新聞標題': row['新聞標題'], '新聞日期': row['新聞日期'],
-                        'AI摘要': row['AI摘要'], '照片清單': ",".join(urls),
+                        'AI摘要': row['AI摘要'], '照片清單': ",".join(file_ids),
                         '新聞連結': row['新聞連結']
                     })
                     
