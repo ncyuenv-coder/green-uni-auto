@@ -24,7 +24,7 @@ if st.session_state.get("authentication_status") is not True:
     st.warning("⚠️ 請先至首頁登入系統！")
     st.stop()
 
-# [修改 1] 僅限 admin_ui 檢視與管理
+# 僅限 admin_ui 檢視與管理
 if st.session_state.get("username") != "admin_ui":
     st.error("🚫 權限不足！此頁面僅限系統管理員 (admin_ui) 存取。")
     st.stop()
@@ -47,6 +47,33 @@ st.markdown("""
         background-color: #154360 !important; border: 1px solid #0B2331 !important; border-bottom: 3px solid #0B2331 !important; 
     }
     button[data-baseweb="tab"][aria-selected="true"] p { color: #FFFFFF !important; }
+
+    /* [新增] 選項標籤設計 (底色區塊按鈕) */
+    .stRadio div[role="radiogroup"] {
+        flex-direction: row !important;
+        gap: 15px !important;
+        margin-bottom: 20px !important;
+    }
+    .stRadio div[role="radiogroup"] label {
+        background-color: #F0F3F4 !important; 
+        border: 2px solid #BDC3C7 !important;
+        border-radius: 10px !important; 
+        padding: 12px 25px !important; 
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .stRadio div[role="radiogroup"] label:hover { background-color: #E5E8E8 !important; }
+    .stRadio div[role="radiogroup"] label p { 
+        font-size: 1.2rem !important; 
+        font-weight: 800 !important; 
+        color: #566573 !important; 
+        margin: 0 !important;
+    }
+    .stRadio div[role="radiogroup"] label[data-checked="true"] { 
+        background-color: #34495E !important; 
+        border-color: #34495E !important; 
+    }
+    .stRadio div[role="radiogroup"] label[data-checked="true"] p { color: #FFFFFF !important; }
 
     /* 各區塊標題 */
     .morandi-select-title { background-color: #9DAB86; color: white; padding: 12px 15px; border-radius: 6px; font-weight: bold; font-size: 1.2em; margin-bottom: 5px; margin-top: 15px; }
@@ -261,7 +288,7 @@ def set_run_font(run):
     run._element.rPr.rFonts.set(qn('w:eastAsia'), '標楷體')
 
 # ==========================================
-# 🌟 核心資料處理與 Word 產製流程 (單題用)
+# 🌟 核心資料處理與 Word 產製流程 (包含精準新聞抓取)
 # ==========================================
 def extract_single_question_data(v_q_id, df_q, df_r, df_news):
     q_match_base = df_q[df_q['當年度題目'].astype(str).str.strip() == v_q_id]
@@ -306,30 +333,42 @@ def extract_single_question_data(v_q_id, df_q, df_r, df_news):
         enriched = [get_file_info(f['id'], f['desc']) for f in files]
         unit_enriched_files[f"【{u}】"] = [e for e in enriched if e]
         
-    # 2. 處理新聞資料 (抓取 AI新聞資料庫)
+    # 2. 處理對應新聞資料 (精準抓取 E, G, H, I 欄位)
     news_data = []
     if not df_news.empty:
-        id_col = '題號' if '題號' in df_news.columns else df_news.columns[0]
-        q_news = df_news[df_news[id_col].astype(str).str.strip() == v_q_id]
+        # 尋找可能是「題號」的欄位 (通常在前三欄 A, B, C)
+        target_col_idx = 0
+        for i, col in enumerate(df_news.columns[:5]):
+            if '題' in str(col) or '指標' in str(col):
+                target_col_idx = i
+                break
         
-        for _, row in q_news.iterrows():
-            # 依需求指定索引：E欄=4, G欄=6, H欄=7, I欄=8
-            n_title = str(row.iloc[4]).strip() if len(row) > 4 else ""
-            n_summary = str(row.iloc[6]).strip() if len(row) > 6 else ""
-            n_photos_str = str(row.iloc[7]).strip() if len(row) > 7 else ""
-            n_link = str(row.iloc[8]).strip() if len(row) > 8 else ""
+        for _, row in df_news.iterrows():
+            row_id = str(row.iloc[target_col_idx]).strip()
+            # 支援一個新聞對應多個題號 (例如: "1.1, 1.2")
+            ids = [x.strip() for x in re.split(r'[,、/，\s]+', row_id) if x.strip()]
             
-            if not n_title and not n_summary: continue
-            
-            # 從字串中萃取 Drive File IDs
-            file_ids = re.findall(r'[-\w]{25,}', n_photos_str)
-            n_enriched = [get_file_info(fid, f"新聞配圖 {i+1}") for i, fid in enumerate(file_ids)]
-            
-            news_data.append({
-                'title': n_title, 'summary': n_summary, 'link': n_link,
-                'enriched_files': [e for e in n_enriched if e]
-            })
-            
+            if v_q_id in ids:
+                # 依需求指定抓取欄位索引：E欄=4, G欄=6, H欄=7, I欄=8
+                n_title = str(row.iloc[4]).strip() if len(row.index) > 4 else ""
+                n_summary = str(row.iloc[6]).strip() if len(row.index) > 6 else ""
+                n_photos_str = str(row.iloc[7]).strip() if len(row.index) > 7 else ""
+                n_link = str(row.iloc[8]).strip() if len(row.index) > 8 else ""
+                
+                # 防呆機制：若無標題且無摘要，則不顯示該新聞
+                if not n_title and not n_summary: continue
+                
+                # 從字串中萃取 Google Drive 的 檔案 ID
+                file_ids = re.findall(r'[-\w]{25,}', n_photos_str)
+                n_enriched = [get_file_info(fid, f"新聞配圖 {i+1}") for i, fid in enumerate(file_ids)]
+                
+                news_data.append({
+                    'title': n_title,
+                    'summary': n_summary,
+                    'link': n_link,
+                    'enriched_files': [e for e in n_enriched if e]
+                })
+                
     return v_q_title, v_desc_text, info_strings, combined_reqs.strip(), combined_texts.strip(), unit_enriched_files, news_data
 
 def build_word_document(v_q_id, v_q_title, info_strings, desc_text, req_text, report_text, unit_enriched_files, news_data):
@@ -378,14 +417,15 @@ def build_word_document(v_q_id, v_q_title, info_strings, desc_text, req_text, re
     if not any(f.get('is_image') for files in unit_enriched_files.values() for f in files) and not has_any_doc:
         doc.add_paragraph("此紀錄無上傳任何單位附件。")
         
-    # 加入新聞亮點與照片
+    # [新增] 寫入新聞亮點與照片至 Word 文件最下方
     if news_data:
         doc.add_heading('相關新聞亮點與佐證：', level=2)
         for idx, news in enumerate(news_data):
-            doc.add_paragraph().add_run(f"【新聞 {idx+1}】 {news['title']}").bold = True
+            p_title = doc.add_paragraph()
+            p_title.add_run(f"【新聞 {idx+1}】 {news['title']}").bold = True
             
             p_sum = doc.add_paragraph()
-            p_sum.add_run("亮點摘要：").bold = True
+            p_sum.add_run("亮點摘要：\n").bold = True
             p_sum.add_run(news['summary'])
             
             if news['link'] and news['link'] != 'nan':
@@ -396,6 +436,7 @@ def build_word_document(v_q_id, v_q_title, info_strings, desc_text, req_text, re
             if news['enriched_files']:
                 add_images_to_word_table(doc, {f"【新聞 {idx+1} 圖片】": news['enriched_files']})
     
+    # 字體美化統一
     for p in doc.paragraphs:
         if not p.style.name.startswith('Heading'): p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         for r in p.runs: set_run_font(r)
@@ -491,7 +532,8 @@ with tab_download:
     if df_r.empty: 
         st.info("💡 目前資料庫中尚未有任何填報紀錄可供下載。")
     else:
-        # [修改 2] 加入雙軌下載模式切換
+        # 底色區塊按鈕呈現
+        st.markdown("<br>", unsafe_allow_html=True)
         dl_mode = st.radio("選擇下載模式", ["單題彙整下載", "全部題目彙整下載"], horizontal=True, label_visibility="collapsed")
         
         reported_q_ids = df_r['題號'].astype(str).str.strip().unique().tolist()
@@ -571,7 +613,7 @@ with tab_download:
                     
         elif dl_mode == "全部題目彙整下載":
             st.markdown("<div class='morandi-select-title'>📦 批量打包下載所有題目報告</div>", unsafe_allow_html=True)
-            st.info("💡 此功能將自動為「所有已填報之題目」分別產生獨立的 Word 報告（含新聞佐證），並打包成一個 ZIP 壓縮檔，方便您一次性下載留存。")
+            st.info("💡 此功能將自動為「所有已填報之題目」分別產生獨立的 Word 報告（含對應新聞與照片佐證），並打包成一個 ZIP 壓縮檔，方便您一次性下載留存。")
             
             if st.button("🚀 一鍵打包產生 ZIP 壓縮檔", type="primary"):
                 with st.spinner("⏳ 正在背景逐題解析資料、抓取圖片並產生 Word 報告，這需要幾分鐘的時間，請耐心等候..."):
@@ -585,7 +627,7 @@ with tab_download:
                         for i, qid in enumerate(reported_q_ids):
                             status_text.text(f"正在處理第 {i+1}/{total_q} 題：{qid} ...")
                             
-                            # 取資料並產製 Word
+                            # 取資料並產製 Word (自動包含該題的新聞資訊)
                             v_q_title, v_desc_text, info_strings, combined_reqs, combined_texts, unit_enriched_files, news_data = extract_single_question_data(qid, df_q, df_r, df_news)
                             docx_bytes = build_word_document(qid, v_q_title, info_strings, v_desc_text, combined_reqs, combined_texts, unit_enriched_files, news_data)
                             
