@@ -5,6 +5,9 @@ import io
 import re
 import datetime
 import base64
+import time
+import random
+import uuid
 from PIL import Image
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -23,13 +26,41 @@ PDF_FILE_ID = "1hXs3yUwNxEiNZkJNeAfDTZjs9jxEgJos"
 DRIVE_UPLOAD_FOLDER_ID = "1C1EbqH2oL-i_uqB6aEAw6S6tEwTvpnNc"
 
 # ==========================================
-# 🛡️ 資安防護罩
+# 🛡️ 資安防護罩 & 線上人數雷達
 # ==========================================
 if st.session_state.get("authentication_status") is not True:
     st.warning("⚠️ 請先至首頁登入系統！")
     st.stop()
 
+username = st.session_state.get("username", "Unknown")
+name = st.session_state.get("name", "Unknown")
+
 st.set_page_config(page_title="嘉大綠色大學填報區", page_icon="📝", layout="wide")
+
+with st.sidebar:
+    st.header(f"👤 {name}")
+    st.caption(f"帳號: {username}")
+    st.success("☁️ 雲端連線正常")
+    
+    # --- 線上人數統計雷達 ---
+    @st.cache_resource
+    def get_active_users(): return {}
+    
+    active_users = get_active_users()
+    if 'session_id' not in st.session_state: st.session_state['session_id'] = str(uuid.uuid4())
+    current_time = time.time()
+    active_users[st.session_state['session_id']] = current_time
+    
+    timeout_seconds = 300
+    keys_to_delete = [sid for sid, ts in active_users.items() if current_time - ts > timeout_seconds]
+    for sid in keys_to_delete: del active_users[sid]
+        
+    online_count = len(active_users)
+    st.markdown("<br>", unsafe_allow_html=True)
+    if online_count >= 20: st.error(f"🔴 目前線上人數: {online_count} 人 (擁擠，建議稍候操作)")
+    elif online_count >= 10: st.warning(f"🟡 目前線上人數: {online_count} 人 (普通，可正常填報)")
+    else: st.success(f"🟢 目前線上人數: {online_count} 人 (順暢)")
+    st.markdown("---")
 
 # ==========================================
 # 🎨 系統 UI 樣式設定
@@ -127,7 +158,8 @@ def get_gcp_credentials():
         client_id=skey.get("client_id"), client_secret=skey.get("client_secret")
     )
 
-@st.cache_data(ttl=600)
+# 將快取時間拉長至一天 (86400秒)，減輕 API 負擔
+@st.cache_data(ttl=86400)
 def load_gsheet_data():
     try:
         creds = get_gcp_credentials()
@@ -140,7 +172,8 @@ def load_gsheet_data():
         return df
     except Exception as e: return pd.DataFrame()
 
-@st.cache_data(ttl=60)
+# 將快取時間拉長至一天 (86400秒)
+@st.cache_data(ttl=86400)
 def load_reported_data():
     try:
         creds = get_gcp_credentials()
@@ -221,21 +254,27 @@ def get_file_info(file_id, desc=""):
         return {'id': file_id, 'desc': desc, 'is_pdf': is_pdf, 'is_image': is_image, 'is_landscape': is_landscape, 'is_panorama': is_panorama, 'b64': b64_str, 'mime_type': mime_type}
     except Exception as e: return None
 
-def write_to_database(unit, reporter, ext, email, q_id, q_title, report_text, file_records):
-    try:
-        creds = get_gcp_credentials()
-        gc = gspread.authorize(creds)
-        sh = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8')
-        ws = sh.worksheet("填報資料庫")
-        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row = [now_str, unit, reporter, ext, email, q_id, q_title, report_text]
-        for record in file_records[:10]: row.extend([record['desc'], record['id']])
-        while len(row) < 28: row.append('')
-        ws.append_row(row[:28])
-        return True
-    except Exception as e: 
-        st.error(f"寫入資料庫失敗：{e}")
-        return False
+# [防護盾 1] 寫入重試機制 (解決多人同時送出的 429 錯誤)
+def write_to_database(unit, reporter, ext, email, q_id, q_title, report_text, file_records, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            creds = get_gcp_credentials()
+            gc = gspread.authorize(creds)
+            sh = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8')
+            ws = sh.worksheet("填報資料庫")
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            row = [now_str, unit, reporter, ext, email, q_id, q_title, report_text]
+            for record in file_records[:10]: row.extend([record['desc'], record['id']])
+            while len(row) < 28: row.append('')
+            ws.append_row(row[:28])
+            return True
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = random.uniform(3.0, 5.0)
+                time.sleep(wait_time)
+            else:
+                st.error(f"寫入資料庫失敗：{e}")
+                return False
 
 # ==========================================
 # 🌟 公文級文字解析引擎：網頁完美縮排對齊
@@ -480,7 +519,6 @@ with tab_fill:
                             st.markdown("#### 🇹🇼 中文翻譯參考")
                             ref_text = question_data.get('2025參考文字_AI預留', '')
                             if pd.notna(ref_text) and str(ref_text).strip() != "": 
-                                # 🌟 同步套用 format_report_text_to_html 確保翻譯區也能完美縮排
                                 formatted_ref_text = format_report_text_to_html(str(ref_text).strip())
                                 st.markdown(f'<div class="custom-scrollbar" style="background-color: #FFFFFF; padding: 20px; border-radius: 8px; border: 2px solid #E2E7E3; height: 600px; overflow-y: auto; font-size: 1.1em; color: #2C3E50;">{formatted_ref_text}</div>', unsafe_allow_html=True)
                             else: 
@@ -569,6 +607,7 @@ with tab_fill:
                                 file_id = upload_file_to_drive(optimized_file, new_filename, DRIVE_UPLOAD_FOLDER_ID)
                                 if file_id: upload_records.append({'desc': safe_desc, 'id': file_id})
                             
+                            # [防護盾 2] 呼叫帶有排隊機制的 write_to_database
                             db_success = write_to_database(
                                 selected_unit, reporter_name, reporter_ext, reporter_email, 
                                 selected_q_id, question_data.get('中文標題', ''), report_text, upload_records
@@ -582,7 +621,10 @@ with tab_fill:
                                         keys_to_delete.append(key)
                                 for key in keys_to_delete: del st.session_state[key]
                                 st.session_state.upload_count = 5
+                                
+                                # [防護盾 3] 送出後觸發自動更新清除快取
                                 load_reported_data.clear() 
+                                load_gsheet_data.clear()
                                 st.rerun()
 
 # ==========================================
