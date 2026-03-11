@@ -6,6 +6,7 @@ import io
 import requests
 import re
 import time
+import random
 import urllib3
 import base64
 from bs4 import BeautifulSoup
@@ -30,7 +31,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 if st.session_state.get("authentication_status") is not True:
     st.warning("⚠️ 請先至首頁登入系統！"); st.stop()
 
-# 🛡️ [修改 1] 僅限 admin_ui 檢視與管理
+# 🛡️ 僅限 admin_ui 檢視與管理
 if st.session_state.get("username") != "admin_ui":
     st.error("🚫 權限不足！此頁面僅限系統管理員 (admin_ui) 存取。")
     st.stop()
@@ -66,99 +67,106 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🔌 資料庫連線與 Google Drive API
+# 🔌 資料庫連線與精準讀寫引擎 (加入防 Crash 重試機制)
 # ==========================================
 @st.cache_resource
 def get_gcp_credentials():
     sk = st.secrets["gcp_oauth"].to_dict()
     return Credentials(token=None, refresh_token=sk["refresh_token"], token_uri="https://oauth2.googleapis.com/token", client_id=sk["client_id"], client_secret=sk["client_secret"])
 
-def load_sheet(sheet_name):
-    try: return pd.DataFrame(gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet(sheet_name).get_all_records()).rename(columns=lambda x: str(x).strip())
-    except: return pd.DataFrame()
+def load_sheet(sheet_name, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return pd.DataFrame(gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet(sheet_name).get_all_records()).rename(columns=lambda x: str(x).strip())
+        except Exception:
+            if attempt < max_retries - 1: time.sleep(2)
+            else: return pd.DataFrame()
 
-def save_raw_to_db(record):
-    try:
-        ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
-        row = [
-            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            str(record['題號']).strip(), str(record['中文標題']).strip(), record['新聞日期'],
-            record['新聞標題'], record['原始內容'], "", 
-            ",".join(record['照片清單']), record['新聞連結']
-        ]
-        ws.append_row(row)
-        return True
-    except Exception: return False
+# 💡 改善連線：直接傳入已開啟的 worksheet，避免迴圈內重複呼叫 API 造成 429 Error
+def save_raw_to_db(ws, record, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            row = [
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                str(record['題號']).strip(), str(record['中文標題']).strip(), record['新聞日期'],
+                record['新聞標題'], record['原始內容'], "", 
+                ",".join(record['照片清單']), record['新聞連結']
+            ]
+            ws.append_row(row)
+            return True
+        except Exception:
+            if attempt < max_retries - 1: time.sleep(random.uniform(2.0, 5.0))
+            else: return False
 
-def delete_rows_from_db(row_indices):
-    try:
-        ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
-        for r_idx in sorted(row_indices, reverse=True):
-            ws.delete_rows(r_idx)
-        return True
-    except Exception: return False
+def delete_rows_from_db(ws, row_indices, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            for r_idx in sorted(row_indices, reverse=True):
+                ws.delete_rows(r_idx)
+            return True
+        except Exception:
+            if attempt < max_retries - 1: time.sleep(2)
+            else: return False
 
-def update_q_ids_in_db(updates):
-    try:
-        ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
-        headers = [str(h).strip() for h in ws.get_all_values()[0]]
-        q_id_col = headers.index('對應題號') + 1
-        q_title_col = headers.index('中文標題') + 1
-        cells = []
-        for u in updates:
-            cells.append(gspread.Cell(row=u['row'], col=q_id_col, value=str(u['new_id'])))
-            cells.append(gspread.Cell(row=u['row'], col=q_title_col, value=str(u['new_title'])))
-        ws.update_cells(cells)
-        return True
-    except Exception: return False
+def update_q_ids_in_db(ws, updates, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            headers = [str(h).strip() for h in ws.get_all_values()[0]]
+            q_id_col = headers.index('對應題號') + 1
+            q_title_col = headers.index('中文標題') + 1
+            cells = []
+            for u in updates:
+                cells.append(gspread.Cell(row=u['row'], col=q_id_col, value=str(u['new_id'])))
+                cells.append(gspread.Cell(row=u['row'], col=q_title_col, value=str(u['new_title'])))
+            ws.update_cells(cells)
+            return True
+        except Exception:
+            if attempt < max_retries - 1: time.sleep(2)
+            else: return False
 
-def update_ai_summary_by_row(row_idx, ai_summary):
-    try:
-        ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
-        headers = [str(h).strip() for h in ws.get_all_values()[0]]
-        ai_idx = headers.index('AI摘要') + 1
-        ws.update_cell(row_idx, ai_idx, str(ai_summary))
-        return True
-    except Exception: return False
+def update_ai_summary_by_row(ws, row_idx, ai_col_idx, ai_summary, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            ws.update_cell(row_idx, ai_col_idx, str(ai_summary))
+            return True
+        except Exception:
+            if attempt < max_retries - 1: time.sleep(random.uniform(2.0, 5.0))
+            else: return False
 
 # ==========================================
-# 🕸️ 爬蟲引擎與圖片雙重瘦身上傳模組
+# 🕸️ 爬蟲引擎與圖片雙重瘦身上傳模組 (加入防 Crash 重試機制)
 # ==========================================
-def download_compress_upload_image(img_url, drive_service, file_name_prefix):
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        req = requests.get(img_url, headers=headers, timeout=10, verify=False)
-        req.raise_for_status()
-        img_bytes = req.content
+def download_compress_upload_image(img_url, drive_service, file_name_prefix, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            req = requests.get(img_url, headers=headers, timeout=15, verify=False)
+            req.raise_for_status()
+            img_bytes = req.content
 
-        # 讀取原始圖片
-        img = Image.open(io.BytesIO(img_bytes))
-        if img.mode in ("RGBA", "P"): 
-            img = img.convert("RGB")
-            
-        # 💡 機制 1: 等比例限制最大尺寸 (破解千萬畫素大圖的關鍵)
-        MAX_SIZE = (1280, 1280)
-        img.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
+            img = Image.open(io.BytesIO(img_bytes))
+            if img.mode in ("RGBA", "P"): img = img.convert("RGB")
+                
+            MAX_SIZE = (1280, 1280)
+            img.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
 
-        # 💡 機制 2: 視覺無損畫質壓縮
-        out_io = io.BytesIO()
-        img.save(out_io, format='JPEG', optimize=True, quality=85)
-        out_io.seek(0)
+            out_io = io.BytesIO()
+            img.save(out_io, format='JPEG', optimize=True, quality=85)
+            out_io.seek(0)
 
-        # 防呆比對：如果壓縮後反而變大，就直接退回原檔
-        if len(out_io.getvalue()) > len(img_bytes):
-            out_io = io.BytesIO(img_bytes)
-            mime_type = req.headers.get('Content-Type', 'image/jpeg')
-        else:
-            mime_type = 'image/jpeg'
+            if len(out_io.getvalue()) > len(img_bytes):
+                out_io = io.BytesIO(img_bytes)
+                mime_type = req.headers.get('Content-Type', 'image/jpeg')
+            else:
+                mime_type = 'image/jpeg'
 
-        # 寫入 Google Drive
-        file_meta = {'name': f"{file_name_prefix}.jpg", 'parents': [NEWS_IMG_FOLDER_ID]}
-        media = MediaIoBaseUpload(out_io, mimetype=mime_type, resumable=True)
-        file = drive_service.files().create(body=file_meta, media_body=media, fields='id').execute()
-        return file.get('id')
-    except Exception as e:
-        return None
+            file_meta = {'name': f"{file_name_prefix}.jpg", 'parents': [NEWS_IMG_FOLDER_ID]}
+            media = MediaIoBaseUpload(out_io, mimetype=mime_type, resumable=True)
+            file = drive_service.files().create(body=file_meta, media_body=media, fields='id').execute()
+            return file.get('id')
+        except Exception:
+            if attempt < max_retries - 1: time.sleep(random.uniform(2.0, 4.0))
+            else: return None
 
 def get_news_list(start_date, end_date):
     base_url = "https://www.ncyu.edu.tw"
@@ -170,9 +178,21 @@ def get_news_list(start_date, end_date):
     
     while page <= 40: 
         list_url = f"{base_url}/ncyu/Subject?nodeId=835&page={page}"
+        success = False
+        
+        # 加入請求重試防護
+        for attempt in range(3):
+            try:
+                req = requests.get(list_url, headers=headers, timeout=15, verify=False)
+                req.encoding = 'utf-8'
+                success = True
+                break
+            except Exception:
+                time.sleep(2)
+                
+        if not success: break
+        
         try:
-            req = requests.get(list_url, headers=headers, timeout=10, verify=False)
-            req.encoding = 'utf-8'
             soup = BeautifulSoup(req.text, 'html.parser')
             links = soup.find_all('a', href=True)
             has_news_in_page = False
@@ -210,92 +230,97 @@ def get_news_list(start_date, end_date):
             if not has_news_in_page: break 
             if old_news_count > 25: break 
         except Exception: break
+        
         page += 1
-        time.sleep(0.2)
+        time.sleep(0.5)
     return news_list
 
-def get_news_content(url):
+def get_news_content(url, max_retries=3):
     base_url = "https://www.ncyu.edu.tw"
     headers = {'User-Agent': 'Mozilla/5.0'}
-    try:
-        d_req = requests.get(url, headers=headers, timeout=10, verify=False)
-        d_req.encoding = 'utf-8'
-        d_soup = BeautifulSoup(d_req.text, 'html.parser')
-        
-        for tag in d_soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
-            tag.decompose()
+    
+    for attempt in range(max_retries):
+        try:
+            d_req = requests.get(url, headers=headers, timeout=15, verify=False)
+            d_req.encoding = 'utf-8'
+            d_soup = BeautifulSoup(d_req.text, 'html.parser')
             
-        noise_patterns = re.compile(r'menu|nav|footer|breadcrumb|sidebar|top-bar|bottom-bar|search|language|header', re.I)
-        for div in d_soup.find_all(['div', 'ul', 'ol', 'section']):
-            class_str = ' '.join(div.get('class', [])) if isinstance(div.get('class'), list) else str(div.get('class', ''))
-            id_str = str(div.get('id', ''))
-            if noise_patterns.search(class_str) or noise_patterns.search(id_str):
-                div.decompose()
-
-        specific_classes = ['m-edit', 'user_edit', 'article-content', 'news-content', 'CCms_Content', 'cg-desc', 'editor', 'app-article']
-        content_div = None
-        for cls in specific_classes:
-            content_div = d_soup.find('div', class_=re.compile(cls, re.I))
-            if content_div: break
-            
-        if not content_div:
-            best_node = None
-            max_score = 0
-            for node in d_soup.find_all(['div', 'article', 'main']):
-                text_len = len(node.get_text(strip=True))
-                if text_len < 50: continue
-                link_len = sum(len(a.get_text(strip=True)) for a in node.find_all('a'))
-                if text_len > 0 and (link_len / text_len) > 0.4: continue 
+            for tag in d_soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
+                tag.decompose()
                 
-                p_count = len(node.find_all('p', recursive=False))
-                score = text_len + (p_count * 50)
-                if score > max_score:
-                    max_score = score
-                    best_node = node
-            content_div = best_node if best_node else d_soup.find('body')
+            noise_patterns = re.compile(r'menu|nav|footer|breadcrumb|sidebar|top-bar|bottom-bar|search|language|header', re.I)
+            for div in d_soup.find_all(['div', 'ul', 'ol', 'section']):
+                class_str = ' '.join(div.get('class', [])) if isinstance(div.get('class'), list) else str(div.get('class', ''))
+                id_str = str(div.get('id', ''))
+                if noise_patterns.search(class_str) or noise_patterns.search(id_str):
+                    div.decompose()
 
-        for br in content_div.find_all(['br', 'hr']):
-            br.replace_with('\n')
-        for block in content_div.find_all(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr']):
-            block.append('\n')
-
-        full_text = content_div.get_text(separator=' ', strip=True)
-        
-        garbage_words = [
-            '國立嘉義大學', ':::', '回首頁', '網站導覽', '分眾導覽', '新生教務專欄', 
-            '學生', '教師', '職員工', '校友', '民眾', '聯絡我們', 'ENGLISH', 
-            'Select Language', '中文 (繁體)', '中文 (简体)', '日本語', 'Bahasa Indonesia', 
-            'हिन्दी', 'Español', 'বাংলা', 'Français', 'العربية', 'English', 'ไทย', 
-            'اردو', 'Bahasa Melayu', 'Filipino', 'Tiếng Việt', 'မြန်မာ', '한국어', 
-            '請輸入關鍵字', '搜尋', '友善列印(開新視窗)', '分享至臉書(開新視窗)', '分享至Line(開新視窗)', '回上一頁'
-        ]
-        
-        clean_lines = []
-        for line in full_text.split('\n'):
-            line_str = line.strip()
-            line_str = re.sub(r' +', ' ', line_str) 
-            line_str = re.sub(r'[（\(][^）\)]*(照片|攝影|拍攝|提供)[^）\)]*[）\)]', '', line_str)
-            line_str = re.sub(r'(?:^|\s)圖\s*\d+\s*[：:].*?(?:[）\)]|。|$)', '', line_str)
-            line_str = line_str.strip()
-            
-            if not line_str: continue
-            if line_str in garbage_words: continue 
-            if len(line_str) <= 3 and '::' in line_str: continue
-            clean_lines.append(line_str)
-            
-        final_text = '\n'.join(clean_lines)
-        
-        img_urls = []
-        for img in content_div.find_all('img'):
-            src = img.get('src')
-            if src and not src.startswith('data:'):
-                img_link = src if src.startswith('http') else base_url + src
-                if 'icon' not in img_link.lower() and 'logo' not in img_link.lower() and 'banner' not in img_link.lower():
-                    img_urls.append(img_link)
+            specific_classes = ['m-edit', 'user_edit', 'article-content', 'news-content', 'CCms_Content', 'cg-desc', 'editor', 'app-article']
+            content_div = None
+            for cls in specific_classes:
+                content_div = d_soup.find('div', class_=re.compile(cls, re.I))
+                if content_div: break
+                
+            if not content_div:
+                best_node = None
+                max_score = 0
+                for node in d_soup.find_all(['div', 'article', 'main']):
+                    text_len = len(node.get_text(strip=True))
+                    if text_len < 50: continue
+                    link_len = sum(len(a.get_text(strip=True)) for a in node.find_all('a'))
+                    if text_len > 0 and (link_len / text_len) > 0.4: continue 
                     
-        return {"原始內容": final_text[:3000], "照片清單": img_urls}
-    except Exception: 
-        return {"原始內容": "無法擷取內文", "照片清單": []}
+                    p_count = len(node.find_all('p', recursive=False))
+                    score = text_len + (p_count * 50)
+                    if score > max_score:
+                        max_score = score
+                        best_node = node
+                content_div = best_node if best_node else d_soup.find('body')
+
+            for br in content_div.find_all(['br', 'hr']):
+                br.replace_with('\n')
+            for block in content_div.find_all(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr']):
+                block.append('\n')
+
+            full_text = content_div.get_text(separator=' ', strip=True)
+            
+            garbage_words = [
+                '國立嘉義大學', ':::', '回首頁', '網站導覽', '分眾導覽', '新生教務專欄', 
+                '學生', '教師', '職員工', '校友', '民眾', '聯絡我們', 'ENGLISH', 
+                'Select Language', '中文 (繁體)', '中文 (简体)', '日本語', 'Bahasa Indonesia', 
+                'हिन्दी', 'Español', 'বাংলা', 'Français', 'العربية', 'English', 'ไทย', 
+                'اردو', 'Bahasa Melayu', 'Filipino', 'Tiếng Việt', 'မြန်မာ', '한국어', 
+                '請輸入關鍵字', '搜尋', '友善列印(開新視窗)', '分享至臉書(開新視窗)', '分享至Line(開新視窗)', '回上一頁'
+            ]
+            
+            clean_lines = []
+            for line in full_text.split('\n'):
+                line_str = line.strip()
+                line_str = re.sub(r' +', ' ', line_str) 
+                line_str = re.sub(r'[（\(][^）\)]*(照片|攝影|拍攝|提供)[^）\)]*[）\)]', '', line_str)
+                line_str = re.sub(r'(?:^|\s)圖\s*\d+\s*[：:].*?(?:[）\)]|。|$)', '', line_str)
+                line_str = line_str.strip()
+                
+                if not line_str: continue
+                if line_str in garbage_words: continue 
+                if len(line_str) <= 3 and '::' in line_str: continue
+                clean_lines.append(line_str)
+                
+            final_text = '\n'.join(clean_lines)
+            
+            img_urls = []
+            for img in content_div.find_all('img'):
+                src = img.get('src')
+                if src and not src.startswith('data:'):
+                    img_link = src if src.startswith('http') else base_url + src
+                    if 'icon' not in img_link.lower() and 'logo' not in img_link.lower() and 'banner' not in img_link.lower():
+                        img_urls.append(img_link)
+                        
+            return {"原始內容": final_text[:3000], "照片清單": img_urls}
+        except Exception:
+            if attempt < max_retries - 1: time.sleep(2)
+            
+    return {"原始內容": "無法擷取內文", "照片清單": []}
 
 # ==========================================
 # 🧠 Gemini AI 摘要引擎
@@ -430,19 +455,17 @@ with tab_scrape:
     with c_start: start_date = st.date_input("新聞起日", datetime.date(2024, 1, 1))
     with c_end: end_date = st.date_input("新聞迄日", datetime.date.today())
     
-    st.info("💡 **【智慧跳過機制】** 系統會自動比對資料庫，如果該篇新聞已經存在於對應的題號中，爬蟲就會自動跳過，不會重複浪費時間下載！")
+    st.info("💡 **【強固防護版】** 系統已啟動「自動斷線重連」、「防 API 擁塞限制」及「智慧跳過已存在新聞」等機制，可安心抓取大量新聞。")
     
     if st.button("🕷️ 開始啟動關鍵字爬取與照片儲存", type="secondary", use_container_width=True):
-        with st.spinner("🤖 正在掃描並陸續寫入資料庫，請稍候..."):
+        with st.spinner("🤖 正在掃描並準備資料庫連線，請稍候..."):
             df_targets = load_sheet("原始新聞抓取")
             df_existing = load_sheet("AI新聞資料庫")
             
-            # [修改 2] 更精準的 existing_set 比對邏輯
             existing_set = set()
             if not df_existing.empty and '對應題號' in df_existing.columns and '新聞連結' in df_existing.columns:
                 for _, r in df_existing.iterrows():
                     row_id = str(r.get('對應題號','')).strip()
-                    # 處理可能有多個題號的情況 (以逗號、斜線等分隔)
                     ids = [x.strip() for x in re.split(r'[,、/，\s]+', row_id) if x.strip()]
                     link = str(r.get('新聞連結','')).strip()
                     for i in ids:
@@ -457,7 +480,7 @@ with tab_scrape:
                 if not basic_news_list:
                     st.warning(f"在 {start_date} 至 {end_date} 區間內未抓取到任何新聞。")
                 else:
-                    st.toast(f"✅ 成功獲取 {len(basic_news_list)} 篇新聞，準備進行比對與圖文入庫...", icon="🎯")
+                    st.toast(f"✅ 成功獲取 {len(basic_news_list)} 篇新聞清單，準備比對...", icon="🎯")
                     
                     matched_tasks = []
                     skipped_count = 0
@@ -480,7 +503,6 @@ with tab_scrape:
                                     check_key = f"{q_id}_{news['新聞連結']}"
                                     if check_key not in existing_set:
                                         matched_tasks.append({'q_id': q_id, 'q_title': q_title, 'news': news})
-                                        # 避免同一次爬蟲中同一篇新聞被同一個題目的多個關鍵字重複加入
                                         existing_set.add(check_key)
                                     else:
                                         skipped_count += 1
@@ -489,27 +511,28 @@ with tab_scrape:
                     if not matched_tasks:
                         st.success(f"🎉 所有符合關鍵字的新聞都已經在資料庫中了 (本次自動跳過了 {skipped_count} 筆已存在的紀錄)！")
                     else:
-                        st.info(f"💡 共比對出 {len(matched_tasks) + skipped_count} 筆符合的新聞，其中 {skipped_count} 筆已存在 (自動跳過)，實際將擷取 {len(matched_tasks)} 筆。")
+                        st.info(f"💡 共比對出 {len(matched_tasks) + skipped_count} 筆新聞，自動跳過 {skipped_count} 筆已存在的資料，實際將擷取並上傳 {len(matched_tasks)} 筆。")
                         
                         success_count = 0
                         total_tasks = len(matched_tasks)
                         progress_text = st.empty()
                         my_bar = st.progress(0)
                         
-                        # 初始化 Drive 服務以供上傳圖片使用
+                        # 💡 [防 Crash 優化]：在外層開啟共用一次的 Drive 與 Sheet 連線，避免在迴圈內反覆呼叫 API 造成 429
                         drive_service = build('drive', 'v3', credentials=get_gcp_credentials())
+                        gc = gspread.authorize(get_gcp_credentials())
+                        ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
                         
                         for i, task in enumerate(matched_tasks):
                             q_id = task['q_id']
                             news_title = task['news']['新聞標題']
                             
-                            progress_text.markdown(f"**📥 ({i+1}/{total_tasks}) 擷取與壓縮圖片中：** 題目 {q_id} v.s. 「{news_title}」")
+                            progress_text.markdown(f"**📥 ({i+1}/{total_tasks}) 擷取與上傳中：** 題目 {q_id} v.s. 「{news_title}」")
                             my_bar.progress((i + 1) / total_tasks)
                             
                             detail = get_news_content(task['news']['新聞連結'])
                             full_news = {**task['news'], **detail}
                             
-                            # 下載並雙重瘦身所有附圖，取得 Drive IDs
                             uploaded_file_ids = []
                             for img_idx, img_url in enumerate(full_news['照片清單']):
                                 clean_name_prefix = f"News_{q_id}_{re.sub(r'[/\\:*?\"<>|]', '', news_title)[:15]}_{img_idx+1}"
@@ -522,16 +545,17 @@ with tab_scrape:
                                 '照片清單': uploaded_file_ids, '新聞連結': full_news['新聞連結']
                             }
                             
-                            if save_raw_to_db(record):
+                            # 寫入資料庫
+                            if save_raw_to_db(ws_ai_db, record):
                                 success_count += 1
-                            time.sleep(1.0) 
+                            time.sleep(1.0) # 寫入後溫和暫停，保護 API
                                     
                         progress_text.empty()
                         my_bar.empty()
-                        st.success(f"🎉 爬蟲作業完成！成功新增擷取 {success_count} 筆新聞與圖片，請前往「階段二」進行人工審核與改寫。")
+                        st.success(f"🎉 爬蟲作業穩健完成！成功新增擷取 {success_count} 筆新聞，請前往「階段二」進行人工審核與改寫。")
 
 # ==========================================
-# 🔍 階段二：人工審核與 Gemini 智慧改寫 (並排佈局)
+# 🔍 階段二：人工審核與 Gemini 智慧改寫
 # ==========================================
 with tab_ai:
     st.markdown("<div class='morandi-dark-title'>🔍 第二階段：人工審核與 AI 智慧改寫</div>", unsafe_allow_html=True)
@@ -565,7 +589,6 @@ with tab_ai:
             df_pending['對應題號'] = df_pending['對應題號'].astype(str).str.strip() + " - " + df_pending['中文標題'].astype(str).str.strip()
             df_pending['預覽選項'] = "【" + df_pending['對應題號'].astype(str) + "】" + df_pending['新聞標題'].astype(str)
             
-            # 🌟 左右並排設計 (左 4：右 6)
             col_preview, col_list = st.columns([4, 6])
             
             with col_preview:
@@ -606,8 +629,11 @@ with tab_ai:
                 with c_save:
                     if st.button("💾 儲存題號異動與刪除", type="secondary", use_container_width=True):
                         with st.spinner("處理中..."):
+                            gc = gspread.authorize(get_gcp_credentials())
+                            ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                            
                             del_rows = edited_df[edited_df['🗑️ 刪除']]['_row_idx'].tolist()
-                            if del_rows: delete_rows_from_db(del_rows)
+                            if del_rows: delete_rows_from_db(ws_ai_db, del_rows)
                                 
                             updates = []
                             for idx, row in edited_df.iterrows():
@@ -618,7 +644,7 @@ with tab_ai:
                                         new_id = new_full_id.split(" - ")[0].strip()
                                         new_title = new_full_id.split(" - ")[1].strip()
                                         updates.append({'row': row['_row_idx'], 'new_id': new_id, 'new_title': new_title})
-                            if updates: update_q_ids_in_db(updates)
+                            if updates: update_q_ids_in_db(ws_ai_db, updates)
                             st.success("✅ 異動儲存完畢！"); time.sleep(1); st.rerun()
 
                 with c_ai:
@@ -633,6 +659,11 @@ with tab_ai:
                                 progress_text2 = st.empty()
                                 bar2 = st.progress(0)
                                 
+                                gc = gspread.authorize(get_gcp_credentials())
+                                ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                                headers = [str(h).strip() for h in ws_ai_db.get_all_values()[0]]
+                                ai_col_idx = headers.index('AI摘要') + 1
+                                
                                 for i, (_, row) in enumerate(ai_rows.iterrows()):
                                     real_row_idx = row['_row_idx']
                                     new_full_id = row['對應題號']
@@ -646,7 +677,7 @@ with tab_ai:
                                     
                                     ai_summary = process_news_with_ai(news_item, target_title)
                                     
-                                    if update_ai_summary_by_row(real_row_idx, ai_summary):
+                                    if update_ai_summary_by_row(ws_ai_db, real_row_idx, ai_col_idx, ai_summary):
                                         success_ai += 1
                                         
                                     time.sleep(1.5)
@@ -699,7 +730,6 @@ with tab_view:
                     st.markdown(f"#### 📰 新聞標題：{row['新聞標題']}")
                     st.caption(f"📅 發布日期：{row['新聞日期']}")
                     
-                    # 讀取 Drive IDs 並轉換為網頁可顯示的 Base64 圖片
                     file_ids = str(row.get('照片清單', '')).split(',')
                     file_ids = [fid.strip() for fid in file_ids if fid.strip()]
                     
