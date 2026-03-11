@@ -639,10 +639,17 @@ with tab_ai:
                             for idx, row in edited_df.iterrows():
                                 if not row['🗑️ 刪除']:
                                     orig_full_id = df_pending.loc[idx, '對應題號']
-                                    new_full_id = row['對應題號']
+                                    # 🔥 防呆修改 1：強制轉字串，避免 None 造成錯誤
+                                    new_full_id = str(row['對應題號']) 
                                     if orig_full_id != new_full_id:
-                                        new_id = new_full_id.split(" - ")[0].strip()
-                                        new_title = new_full_id.split(" - ")[1].strip()
+                                        # 🔥 防呆修改 2：確保字串內含有 " - " 再執行切割
+                                        if " - " in new_full_id:
+                                            new_id = new_full_id.split(" - ", 1)[0].strip()
+                                            new_title = new_full_id.split(" - ", 1)[1].strip()
+                                        else:
+                                            new_id = new_full_id.strip()
+                                            new_title = ""
+                                            
                                         updates.append({'row': row['_row_idx'], 'new_id': new_id, 'new_title': new_title})
                             if updates: update_q_ids_in_db(ws_ai_db, updates)
                             st.success("✅ 異動儲存完畢！"); time.sleep(1); st.rerun()
@@ -666,8 +673,9 @@ with tab_ai:
                                 
                                 for i, (_, row) in enumerate(ai_rows.iterrows()):
                                     real_row_idx = row['_row_idx']
-                                    new_full_id = row['對應題號']
-                                    target_title = new_full_id.split(" - ")[1].strip()
+                                    # 🔥 防呆修改 3：同步保護跑 AI 時的字串切割
+                                    new_full_id = str(row['對應題號'])
+                                    target_title = new_full_id.split(" - ", 1)[1].strip() if " - " in new_full_id else ""
                                     
                                     progress_text2.markdown(f"**✨ 處理中 ({i+1}/{len(ai_rows)})：** {row['新聞標題']}")
                                     bar2.progress((i + 1) / len(ai_rows))
