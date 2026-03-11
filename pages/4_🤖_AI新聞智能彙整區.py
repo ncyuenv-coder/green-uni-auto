@@ -32,7 +32,7 @@ if st.session_state.get("authentication_status") is not True:
 
 st.set_page_config(page_title="嘉大 AI 新聞智能彙整", page_icon="📰", layout="wide")
 
-# 📂 新聞照片存放的 Google Drive 資料夾 ID (請修改為您的真實 ID)
+# 📂 新聞照片存放的 Google Drive 資料夾 ID (已更新為真實 ID)
 NEWS_IMG_FOLDER_ID = "1VNOna4gRdtTIiFPc4XqMJU2jP01LcyXM" 
 
 # 🌟 初始化 Gemini AI 大腦
@@ -117,7 +117,7 @@ def update_ai_summary_by_row(row_idx, ai_summary):
     except Exception: return False
 
 # ==========================================
-# 🕸️ 爬蟲引擎與圖片上傳模組
+# 🕸️ 爬蟲引擎與圖片雙重瘦身上傳模組
 # ==========================================
 def download_compress_upload_image(img_url, drive_service, file_name_prefix):
     try:
@@ -126,20 +126,30 @@ def download_compress_upload_image(img_url, drive_service, file_name_prefix):
         req.raise_for_status()
         img_bytes = req.content
 
-        # 無損壓縮邏輯
+        # 讀取原始圖片
         img = Image.open(io.BytesIO(img_bytes))
-        if img.mode in ("RGBA", "P"): img = img.convert("RGB")
+        if img.mode in ("RGBA", "P"): 
+            img = img.convert("RGB")
+            
+        # 💡 機制 1: 等比例限制最大尺寸 (破解千萬畫素大圖的關鍵)
+        MAX_SIZE = (1280, 1280)
+        img.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
+
+        # 💡 機制 2: 視覺無損畫質壓縮
         out_io = io.BytesIO()
         img.save(out_io, format='JPEG', optimize=True, quality=85)
         out_io.seek(0)
 
-        # 防呆：如果壓縮後反而變大，就用原檔
+        # 防呆比對：如果壓縮後反而變大，就直接退回原檔
         if len(out_io.getvalue()) > len(img_bytes):
             out_io = io.BytesIO(img_bytes)
+            mime_type = req.headers.get('Content-Type', 'image/jpeg')
+        else:
+            mime_type = 'image/jpeg'
 
         # 寫入 Google Drive
         file_meta = {'name': f"{file_name_prefix}.jpg", 'parents': [NEWS_IMG_FOLDER_ID]}
-        media = MediaIoBaseUpload(out_io, mimetype='image/jpeg', resumable=True)
+        media = MediaIoBaseUpload(out_io, mimetype=mime_type, resumable=True)
         file = drive_service.files().create(body=file_meta, media_body=media, fields='id').execute()
         return file.get('id')
     except Exception as e:
@@ -480,7 +490,7 @@ with tab_scrape:
                             detail = get_news_content(task['news']['新聞連結'])
                             full_news = {**task['news'], **detail}
                             
-                            # 下載並壓縮所有附圖，取得 Drive IDs
+                            # 下載並雙重瘦身所有附圖，取得 Drive IDs
                             uploaded_file_ids = []
                             for img_idx, img_url in enumerate(full_news['照片清單']):
                                 clean_name_prefix = f"News_{q_id}_{re.sub(r'[/\\:*?\"<>|]', '', news_title)[:15]}_{img_idx+1}"
