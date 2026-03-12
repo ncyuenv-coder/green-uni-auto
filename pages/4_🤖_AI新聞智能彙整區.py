@@ -45,7 +45,6 @@ NEWS_IMG_FOLDER_ID = "1VNOna4gRdtTIiFPc4XqMJU2jP01LcyXM"
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
-    # 🔥 修改 1：改用最穩定的主力模型，避免找不到型號的問題
     ai_model = genai.GenerativeModel('gemini-2.0-flash') 
 except Exception as e:
     st.error(f"⚠️ 無法載入 Gemini API Key，或設定有誤：{e}")
@@ -59,16 +58,17 @@ st.markdown("""
     button[data-baseweb="tab"][aria-selected="true"] p { color: #FFFFFF !important; }
     .morandi-title { background-color: #738A96; color: white; padding: 15px 20px; border-radius: 8px; font-weight: bold; font-size: 1.5em; margin-bottom: 20px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     .morandi-dark-title { background-color: #5C6B73; color: white; padding: 12px 20px; border-radius: 6px; font-weight: bold; font-size: 1.3em; margin-bottom: 10px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    div.stButton > button[kind="primary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.3em !important; padding: 12px 30px !important; background-color: #D4A373 !important; border: none !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    div.stButton > button[kind="secondary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.3em !important; padding: 12px 30px !important; background-color: #8FAAB8 !important; color: white !important; border: none !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    div.stButton > button[kind="primary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.2em !important; padding: 10px 20px !important; background-color: #D4A373 !important; border: none !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    div.stButton > button[kind="secondary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.2em !important; padding: 10px 20px !important; background-color: #8FAAB8 !important; color: white !important; border: none !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     div.stButton > button[kind="secondary"]:hover { background-color: #738A96 !important; }
     [data-testid="stDownloadButton"] button { background-color: #D4A373 !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: bold !important; font-size: 1.3em !important; padding: 12px 24px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     .raw-box { background-color: #FDF6E3; padding: 20px; border-left: 5px solid #E6C27A; border-radius: 6px; height: 500px; overflow-y: auto; line-height: 1.8; font-size: 1.1em; color: #333;}
+    .action-box { background-color: #F4F6F6; padding: 20px; border-radius: 8px; border: 1px solid #D5DBDB; margin-top: 15px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🔌 資料庫連線與精準讀寫引擎 (加入防 Crash 重試機制)
+# 🔌 資料庫連線與精準讀寫引擎
 # ==========================================
 @st.cache_resource
 def get_gcp_credentials():
@@ -361,7 +361,7 @@ def get_news_content(url, max_retries=3):
     return {"原始內容": "無法擷取內文", "照片清單": []}
 
 # ==========================================
-# 🧠 Gemini AI 摘要引擎 (已解鎖真實報錯訊息)
+# 🧠 Gemini AI 摘要引擎 
 # ==========================================
 def process_news_with_ai(news_item, q_title):
     prompt = f"""
@@ -378,13 +378,11 @@ def process_news_with_ai(news_item, q_title):
     """
     try:
         response = ai_model.generate_content(prompt)
-        # 🔥 修改 2：捕捉因安全機制阻擋而無法產生文字的例外狀況
         try:
             return response.text.strip()
         except ValueError:
             return f"⚠️ 內容可能因觸發 Google 安全機制（如特定敏感詞彙）而被拒絕摘要。"
     except Exception as e: 
-        # 🔥 修改 3：將真實的系統錯誤 (如 429 流量限制或模型錯誤) 完整回傳
         return f"❌ 系統錯誤: {str(e)}"
 
 # ==========================================
@@ -543,7 +541,6 @@ with tab_scrape:
                         progress_text = st.empty()
                         my_bar = st.progress(0)
                         
-                        # 💡 [防 Crash 優化]：在外層開啟共用一次的 Drive 與 Sheet 連線，避免在迴圈內反覆呼叫 API 造成 429
                         drive_service = build('drive', 'v3', credentials=get_gcp_credentials())
                         gc = gspread.authorize(get_gcp_credentials())
                         ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
@@ -579,7 +576,7 @@ with tab_scrape:
                         st.success(f"🎉 爬蟲作業穩健完成！成功新增擷取 {success_count} 筆新聞，請前往「階段二」進行人工審核與改寫。")
 
 # ==========================================
-# 🔍 階段二：人工審核與 Gemini 智慧改寫
+# 🔍 階段二：單一新聞獨立處理模式 (UI 全面升級)
 # ==========================================
 with tab_ai:
     st.markdown("<div class='morandi-dark-title'>🔍 第二階段：人工審核與 AI 智慧改寫</div>", unsafe_allow_html=True)
@@ -595,6 +592,7 @@ with tab_ai:
         missing = [col for col in required_cols if col not in df_ai_db.columns]
         st.error(f"⚠️ 您的《AI新聞資料庫》缺少必要的欄位標題：`{', '.join(missing)}`")
     else:
+        # 建立有效題號清單 (給修改題號的選單使用)
         valid_q_list = []
         if not df_targets.empty:
             for _, r in df_targets.iterrows():
@@ -603,135 +601,116 @@ with tab_ai:
                 if qid:
                     valid_q_list.append(f"{qid} - {qtitle}")
         
+        # 篩選出尚未進行 AI 摘要的新聞
         df_ai_db['AI摘要'] = df_ai_db['AI摘要'].astype(str).str.strip()
         df_pending = df_ai_db[df_ai_db['AI摘要'] == ''].copy()
         
         if df_pending.empty:
             st.success("🎉 太棒了！資料庫中所有新聞都已經完成 AI 摘要改寫囉！")
         else:
+            # 建立選單選項文字
             df_pending['_row_idx'] = df_pending.index + 2
             df_pending['對應題號'] = df_pending['對應題號'].astype(str).str.strip() + " - " + df_pending['中文標題'].astype(str).str.strip()
-            df_pending['預覽選項'] = "【" + df_pending['對應題號'].astype(str) + "】" + df_pending['新聞標題'].astype(str)
+            df_pending['下拉選項'] = "【" + df_pending['對應題號'].astype(str) + "】 " + df_pending['新聞標題'].astype(str)
             
-            col_preview, col_list = st.columns([4, 6])
+            st.markdown(f"#### 📝 尚有 <span style='color:red;'>{len(df_pending)}</span> 筆待處理新聞", unsafe_allow_html=True)
+            st.info("💡 請從下方選單挑選一則新聞，預覽內容後在底部點擊對應的處理按鈕即可。")
             
-            with col_preview:
-                st.markdown("#### 👀 預覽新聞內文 (人工審核輔助)")
-                prev_sel = st.selectbox("選擇下方清單中的新聞進行預覽", df_pending['預覽選項'].tolist(), key="preview_sel")
-                if prev_sel:
-                    prev_row = df_pending[df_pending['預覽選項'] == prev_sel].iloc[0]
-                    st.markdown(f"**🎯 預設題號：** {prev_row['對應題號']}")
-                    st.markdown(f"**🔗 原文連結：** [{prev_row['新聞連結']}]({prev_row['新聞連結']})")
-                    st.markdown(f"<div class='raw-box'>{prev_row['原始內容']}</div>", unsafe_allow_html=True)
-
-            with col_list:
-                st.markdown(f"#### 📝 待處理清單 (尚有 <span style='color:red;'>{len(df_pending)}</span> 筆)", unsafe_allow_html=True)
-                st.info("💡 確認新聞內容無誤後，勾選最左側的「🤖 跑 AI」，並點擊下方執行按鈕。若新聞與題目無關，可直接勾選「🗑️ 刪除」。")
+            # 1. 獨立新聞選擇下拉選單
+            selected_news_str = st.selectbox("📌 請選擇要處理的新聞：", df_pending['下拉選項'].tolist())
+            
+            if selected_news_str:
+                # 擷取當前選擇新聞的詳細資料
+                target_row = df_pending[df_pending['下拉選項'] == selected_news_str].iloc[0]
+                real_row_idx = target_row['_row_idx']
+                current_full_id = target_row['對應題號']
+                news_title = target_row['新聞標題']
+                news_content = target_row['原始內容']
+                news_link = target_row['新聞連結']
+                news_date = target_row['新聞日期']
                 
-                df_pending.insert(0, "🤖 跑 AI", False)
-                df_pending.insert(1, "🗑️ 刪除", False)
+                # 2. 顯示新聞內容與預覽
+                st.markdown("---")
+                st.markdown(f"### 📰 {news_title}")
+                st.caption(f"📅 發布日期：{news_date} | 🎯 目前對應題目：**{current_full_id}**")
+                st.markdown(f"**🔗 原文連結：** [{news_link}]({news_link})")
+                st.markdown(f"<div class='raw-box'>{news_content}</div>", unsafe_allow_html=True)
                 
-                display_cols = ["🤖 跑 AI", "🗑️ 刪除", "對應題號", "新聞標題", "新聞日期", "新聞連結", "_row_idx"]
+                # 3. 三大功能操作區塊
+                st.markdown("<div class='action-box'>", unsafe_allow_html=True)
+                st.markdown("### 🛠️ 請選擇處理模式")
                 
-                edited_df = st.data_editor(
-                    df_pending[display_cols],
-                    hide_index=True,
-                    use_container_width=True,
-                    height=400,
-                    column_config={
-                        "🤖 跑 AI": st.column_config.CheckboxColumn("🤖 跑 AI", default=False),
-                        "🗑️ 刪除": st.column_config.CheckboxColumn("🗑️ 刪除", default=False),
-                        "對應題號": st.column_config.SelectboxColumn("對應題號 (點擊可換題)", options=valid_q_list, required=True),
-                        "新聞連結": st.column_config.LinkColumn("連結"),
-                        "_row_idx": None
-                    },
-                    disabled=["新聞標題", "新聞日期", "新聞連結"]
-                )
+                col_act1, col_act2 = st.columns([1, 1], gap="large")
                 
-                c_save, c_ai = st.columns([1, 1])
-                
-                with c_save:
-                    if st.button("💾 儲存題號異動與刪除", type="secondary", use_container_width=True):
-                        with st.spinner("處理中..."):
+                with col_act1:
+                    st.markdown("#### 🚀 模式一：AI 處理")
+                    st.write("確認新聞與題目相符，直接交由 Gemini 濃縮摘要。")
+                    if st.button("✨ 啟動 Gemini 智慧改寫", type="primary", use_container_width=True):
+                        with st.spinner("呼叫 Gemini 處理中..."):
+                            gc = gspread.authorize(get_gcp_credentials())
+                            ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                            headers = [str(h).strip() for h in ws_ai_db.get_all_values()[0]]
+                            ai_col_idx = headers.index('AI摘要') + 1
+                            
+                            target_title = current_full_id.split(" - ", 1)[1].strip() if " - " in current_full_id else ""
+                            news_item = {'新聞標題': news_title, '原始內容': news_content}
+                            
+                            ai_summary = process_news_with_ai(news_item, target_title)
+                            
+                            if update_ai_summary_by_row(ws_ai_db, real_row_idx, ai_col_idx, ai_summary):
+                                st.success("🎉 完成！成功生成新聞摘要並寫入資料庫！")
+                                time.sleep(1.5)
+                                st.rerun()
+                                
+                    st.markdown("---")
+                    st.markdown("#### 🗑️ 模式二：刪除廢棄")
+                    st.write("若此新聞無參考價值，將徹底從資料庫與雲端硬碟移除。")
+                    if st.button("🗑️ 徹底刪除此新聞 (含照片)", type="secondary", use_container_width=True):
+                        with st.spinner("正在安全刪除照片與紀錄..."):
                             gc = gspread.authorize(get_gcp_credentials())
                             ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
                             
-                            del_df = edited_df[edited_df['🗑️ 刪除']]
-                            del_rows = del_df['_row_idx'].tolist()
+                            # 刪除 Drive 上的照片
+                            photos_str = str(target_row.get('照片清單', ''))
+                            if photos_str:
+                                fids = [f.strip() for f in photos_str.split(',') if f.strip()]
+                                if fids: delete_drive_files(fids)
+                                
+                            # 刪除 Sheet 上的資料列
+                            delete_rows_from_db(ws_ai_db, [real_row_idx])
+                            st.success("✅ 該篇新聞與附屬的雲端照片皆已徹底刪除！")
+                            time.sleep(1.5)
+                            st.rerun()
                             
-                            if del_rows: 
-                                drive_file_ids_to_delete = []
-                                for idx, row in del_df.iterrows():
-                                    real_row_idx = row['_row_idx']
-                                    orig_row = df_pending[df_pending['_row_idx'] == real_row_idx].iloc[0]
-                                    photos_str = str(orig_row.get('照片清單', ''))
-                                    if photos_str:
-                                        fids = [f.strip() for f in photos_str.split(',') if f.strip()]
-                                        drive_file_ids_to_delete.extend(fids)
-                                
-                                if drive_file_ids_to_delete:
-                                    delete_drive_files(drive_file_ids_to_delete)
-                                    
-                                delete_rows_from_db(ws_ai_db, del_rows)
-                                
-                            updates = []
-                            for idx, row in edited_df.iterrows():
-                                if not row['🗑️ 刪除']:
-                                    orig_full_id = df_pending.loc[idx, '對應題號']
-                                    new_full_id = str(row['對應題號']) 
-                                    if orig_full_id != new_full_id:
-                                        if " - " in new_full_id:
-                                            new_id = new_full_id.split(" - ", 1)[0].strip()
-                                            new_title = new_full_id.split(" - ", 1)[1].strip()
-                                        else:
-                                            new_id = new_full_id.strip()
-                                            new_title = ""
-                                            
-                                        updates.append({'row': row['_row_idx'], 'new_id': new_id, 'new_title': new_title})
-                            if updates: update_q_ids_in_db(ws_ai_db, updates)
-                            st.success("✅ 異動與照片刪除儲存完畢！"); time.sleep(1); st.rerun()
-
-                with c_ai:
-                    if st.button("🚀 啟動 Gemini 智慧改寫", type="primary", use_container_width=True):
-                        ai_rows = edited_df[(edited_df['🤖 跑 AI']) & (~edited_df['🗑️ 刪除'])]
+                with col_act2:
+                    st.markdown("#### ✏️ 模式三：修改題號")
+                    st.write("若此新聞判斷的題目不正確，請從下方選擇正確題號並儲存。")
+                    
+                    try: 
+                        idx_default = valid_q_list.index(current_full_id)
+                    except ValueError: 
+                        idx_default = 0
                         
-                        if ai_rows.empty:
-                            st.warning("請先勾選至少一筆要「跑 AI」的新聞！")
-                        else:
-                            with st.spinner(f"呼叫 Gemini 處理 {len(ai_rows)} 筆新聞中..."):
-                                success_ai = 0
-                                progress_text2 = st.empty()
-                                bar2 = st.progress(0)
-                                
+                    new_q_selection = st.selectbox("選擇新對應題號：", valid_q_list, index=idx_default, label_visibility="collapsed")
+                    
+                    if st.button("💾 儲存新題號", use_container_width=True):
+                        if new_q_selection != current_full_id:
+                            with st.spinner("正在為您更新對應題號..."):
                                 gc = gspread.authorize(get_gcp_credentials())
                                 ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
-                                headers = [str(h).strip() for h in ws_ai_db.get_all_values()[0]]
-                                ai_col_idx = headers.index('AI摘要') + 1
                                 
-                                for i, (_, row) in enumerate(ai_rows.iterrows()):
-                                    real_row_idx = row['_row_idx']
-                                    new_full_id = str(row['對應題號'])
-                                    target_title = new_full_id.split(" - ", 1)[1].strip() if " - " in new_full_id else ""
-                                    
-                                    progress_text2.markdown(f"**✨ 處理中 ({i+1}/{len(ai_rows)})：** {row['新聞標題']}")
-                                    bar2.progress((i + 1) / len(ai_rows))
-                                    
-                                    full_content = df_pending[df_pending['_row_idx'] == real_row_idx].iloc[0]['原始內容']
-                                    news_item = {'新聞標題': row['新聞標題'], '原始內容': full_content}
-                                    
-                                    ai_summary = process_news_with_ai(news_item, target_title)
-                                    
-                                    if update_ai_summary_by_row(ws_ai_db, real_row_idx, ai_col_idx, ai_summary):
-                                        success_ai += 1
-                                        
-                                    # 🔥 修改 4：放慢請求節奏，確保遵守 Google API 免費版限制 (15 RPM)
-                                    time.sleep(4.5)
-                                    
-                                progress_text2.empty()
-                                bar2.empty()
-                                st.success(f"🎉 完成！成功生成 {success_ai} 筆新聞摘要！請前往「階段三」檢視。")
-                                time.sleep(1.5)
-                                st.rerun()
+                                new_id = new_q_selection.split(" - ", 1)[0].strip() if " - " in new_q_selection else new_q_selection.strip()
+                                new_title = new_q_selection.split(" - ", 1)[1].strip() if " - " in new_q_selection else ""
+                                
+                                updates = [{'row': real_row_idx, 'new_id': new_id, 'new_title': new_title}]
+                                if update_q_ids_in_db(ws_ai_db, updates):
+                                    st.success("✅ 題號修改成功！")
+                                    time.sleep(1.5)
+                                    st.rerun()
+                        else:
+                            st.warning("您選擇的題號與目前相同，無須修改喔！")
+                
+                st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
 # 📥 階段三：檢視與下載彙整區
