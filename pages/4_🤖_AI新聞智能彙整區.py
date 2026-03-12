@@ -202,7 +202,6 @@ def rename_drive_files(file_ids, new_q_id, news_title, max_retries=3):
     except Exception:
         pass 
 
-# 🔥 修正：為讀取 Drive 檔案加入「智慧重試迴圈」，解決 API 擁塞導致的圖片載入失敗
 def drive_id_to_bytes(file_id, max_retries=3):
     for attempt in range(max_retries):
         try:
@@ -219,7 +218,6 @@ def drive_id_to_bytes(file_id, max_retries=3):
             if attempt < max_retries - 1: time.sleep(random.uniform(1.0, 2.0))
     return None
 
-# 🔥 修正：加入 st.cache_data 記憶體快取。載入過的圖片瞬間讀取，解決 UI 刪除時的嚴重卡頓！
 @st.cache_data(ttl=86400, show_spinner=False)
 def get_drive_image_b64(file_id):
     fh = drive_id_to_bytes(file_id)
@@ -469,7 +467,7 @@ def generate_ai_word_report(q_id, q_title, news_records):
         doc.add_heading(f"新聞標題：{record['新聞標題']}", level=2)
         p_date = doc.add_paragraph(); p_date.add_run(f"發布日期：{record['新聞日期']}").italic = True
         
-        file_ids = str(record['照片清單']).split(',') if record['照片清單'] else []
+        file_ids = str(record['照片清單']).split(',')
         file_ids = [fid.strip() for fid in file_ids if fid.strip()]
         
         if file_ids:
@@ -889,33 +887,51 @@ with tab_view:
                                     
                                 delete_rows_from_db(ws_ai_db, [real_row_idx])
                                 st.success("✅ 該篇新聞與附屬照片已徹底刪除！")
-                                # 🔥 修正：拔除 time.sleep 讓介面瞬間刷新
                                 st.rerun()
                     
-                    file_ids = str(row.get('照片清單', '')).split(',')
-                    file_ids = [fid.strip() for fid in file_ids if fid.strip()]
+                    # 🔥 自動偵測失效照片並自癒清理的機制
+                    raw_file_ids = str(row.get('照片清單', '')).split(',')
+                    raw_file_ids = [fid.strip() for fid in raw_file_ids if fid.strip()]
                     
-                    if file_ids:
-                        st.markdown("**📸 新聞照片 (點擊下方按鈕可刪除不需要的圖片)**")
-                        img_cols = st.columns(4)
-                        for i, fid in enumerate(file_ids):
-                            with img_cols[i % 4]:
-                                b64_img = get_drive_image_b64(fid)
-                                if b64_img:
-                                    st.markdown(f"<img src='data:image/jpeg;base64,{b64_img}' style='width:100%; height:200px; object-fit:contain; border-radius:8px; border:1px solid #ddd; margin-bottom:5px;'>", unsafe_allow_html=True)
+                    valid_fids = []
+                    b64_dict = {}
+                    failed_fids = []
+                    
+                    if raw_file_ids:
+                        for fid in raw_file_ids:
+                            b64_img = get_drive_image_b64(fid)
+                            if b64_img:
+                                valid_fids.append(fid)
+                                b64_dict[fid] = b64_img
+                            else:
+                                failed_fids.append(fid)
+                                
+                        # 如果有載入失敗的照片，立即從資料庫與雲端抹除，實踐自癒
+                        if failed_fids:
+                            new_photo_str = ",".join(valid_fids)
+                            gc = gspread.authorize(get_gcp_credentials())
+                            ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                            update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
+                            # 順手清一下雲端，防止是因為檔案權限異常而非真遺失
+                            delete_drive_files(failed_fids)
+                        
+                        # 只渲染真正健康有效的照片
+                        if valid_fids:
+                            st.markdown("**📸 新聞照片 (點擊下方按鈕可刪除不需要的圖片)**")
+                            img_cols = st.columns(4)
+                            for i, fid in enumerate(valid_fids):
+                                with img_cols[i % 4]:
+                                    st.markdown(f"<img src='data:image/jpeg;base64,{b64_dict[fid]}' style='width:100%; height:200px; object-fit:contain; border-radius:8px; border:1px solid #ddd; margin-bottom:5px;'>", unsafe_allow_html=True)
                                     if st.button("🗑️ 刪除此圖", key=f"del_img_{real_row_idx}_{fid}", use_container_width=True):
                                         with st.spinner("刪除雲端圖片中..."):
                                             delete_drive_files([fid])
-                                            new_file_ids = [f for f in file_ids if f != fid]
+                                            new_file_ids = [f for f in valid_fids if f != fid]
                                             new_photo_str = ",".join(new_file_ids)
                                             gc = gspread.authorize(get_gcp_credentials())
                                             ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
                                             update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
                                             st.success("✅ 照片已刪除")
-                                            # 🔥 修正：拔除 time.sleep 讓介面瞬間刷新
                                             st.rerun()
-                                else:
-                                    st.error("圖片載入失敗")
                     
                     st.markdown("**✨ Gemini 濃縮摘要 (含 SDGs)**")
                     fmt_ai = format_report_text_to_html(row['AI摘要'])
@@ -923,9 +939,10 @@ with tab_view:
                     
                     st.markdown("<hr style='border:1px dashed #ccc; margin-top:20px; margin-bottom:20px;'>", unsafe_allow_html=True)
                     
+                    # 報表生成也只納入健康的照片，確保不會有報錯字樣
                     records_to_print.append({
                         '新聞標題': row['新聞標題'], '新聞日期': row['新聞日期'],
-                        'AI摘要': row['AI摘要'], '照片清單': ",".join(file_ids),
+                        'AI摘要': row['AI摘要'], '照片清單': ",".join(valid_fids),
                         '新聞連結': row['新聞連結']
                     })
                     
