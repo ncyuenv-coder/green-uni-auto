@@ -45,9 +45,10 @@ NEWS_IMG_FOLDER_ID = "1VNOna4gRdtTIiFPc4XqMJU2jP01LcyXM"
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
-    ai_model = genai.GenerativeModel('gemini-2.5-flash-lite') 
+    # 🔥 修改 1：改用最穩定的主力模型，避免找不到型號的問題
+    ai_model = genai.GenerativeModel('gemini-2.0-flash') 
 except Exception as e:
-    st.error("⚠️ 無法載入 Gemini API Key，請確認 secrets.toml 設定！")
+    st.error(f"⚠️ 無法載入 Gemini API Key，或設定有誤：{e}")
     st.stop()
 
 st.markdown("""
@@ -82,7 +83,6 @@ def load_sheet(sheet_name, max_retries=3):
             if attempt < max_retries - 1: time.sleep(2)
             else: return pd.DataFrame()
 
-# 💡 改善連線：直接傳入已開啟的 worksheet，避免迴圈內重複呼叫 API 造成 429 Error
 def save_raw_to_db(ws, record, max_retries=5):
     for attempt in range(max_retries):
         try:
@@ -134,7 +134,46 @@ def update_ai_summary_by_row(ws, row_idx, ai_col_idx, ai_summary, max_retries=5)
             else: return False
 
 # ==========================================
-# 🕸️ 爬蟲引擎與圖片雙重瘦身上傳模組 (加入防 Crash 重試機制)
+# 🌟 Drive 讀取、寫入與刪除引擎
+# ==========================================
+def delete_drive_files(file_ids, max_retries=3):
+    if not file_ids: return
+    try:
+        creds = get_gcp_credentials()
+        drive_service = build('drive', 'v3', credentials=creds)
+        for file_id in file_ids:
+            fid = file_id.strip()
+            if not fid: continue
+            for attempt in range(max_retries):
+                try:
+                    drive_service.files().delete(fileId=fid).execute()
+                    break
+                except Exception:
+                    if attempt < max_retries - 1: time.sleep(1)
+    except Exception:
+        pass 
+
+def drive_id_to_bytes(file_id):
+    try:
+        creds = get_gcp_credentials()
+        drive_service = build('drive', 'v3', credentials=creds)
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done: status, done = downloader.next_chunk()
+        fh.seek(0)
+        return fh
+    except: return None
+
+def get_drive_image_b64(file_id):
+    fh = drive_id_to_bytes(file_id)
+    if fh:
+        return base64.b64encode(fh.read()).decode('utf-8')
+    return ""
+
+# ==========================================
+# 🕸️ 爬蟲引擎與圖片雙重瘦身上傳模組 
 # ==========================================
 def download_compress_upload_image(img_url, drive_service, file_name_prefix, max_retries=3):
     for attempt in range(max_retries):
@@ -180,7 +219,6 @@ def get_news_list(start_date, end_date):
         list_url = f"{base_url}/ncyu/Subject?nodeId=835&page={page}"
         success = False
         
-        # 加入請求重試防護
         for attempt in range(3):
             try:
                 req = requests.get(list_url, headers=headers, timeout=15, verify=False)
@@ -323,7 +361,7 @@ def get_news_content(url, max_retries=3):
     return {"原始內容": "無法擷取內文", "照片清單": []}
 
 # ==========================================
-# 🧠 Gemini AI 摘要引擎
+# 🧠 Gemini AI 摘要引擎 (已解鎖真實報錯訊息)
 # ==========================================
 def process_news_with_ai(news_item, q_title):
     prompt = f"""
@@ -340,31 +378,18 @@ def process_news_with_ai(news_item, q_title):
     """
     try:
         response = ai_model.generate_content(prompt)
-        return response.text.strip()
-    except Exception: return f"AI 處理失敗"
+        # 🔥 修改 2：捕捉因安全機制阻擋而無法產生文字的例外狀況
+        try:
+            return response.text.strip()
+        except ValueError:
+            return f"⚠️ 內容可能因觸發 Google 安全機制（如特定敏感詞彙）而被拒絕摘要。"
+    except Exception as e: 
+        # 🔥 修改 3：將真實的系統錯誤 (如 429 流量限制或模型錯誤) 完整回傳
+        return f"❌ 系統錯誤: {str(e)}"
 
 # ==========================================
-# 🌟 Drive 讀取與 Word 產製引擎
+# 🌟 Word 報表產製模組
 # ==========================================
-def drive_id_to_bytes(file_id):
-    try:
-        creds = get_gcp_credentials()
-        drive_service = build('drive', 'v3', credentials=creds)
-        request = drive_service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done: status, done = downloader.next_chunk()
-        fh.seek(0)
-        return fh
-    except: return None
-
-def get_drive_image_b64(file_id):
-    fh = drive_id_to_bytes(file_id)
-    if fh:
-        return base64.b64encode(fh.read()).decode('utf-8')
-    return ""
-
 def format_report_text_to_html(text):
     text = str(text)
     text = re.sub(r'(^|\n)(\d+[\.\)]|[-•*])\s*\n\s*', r'\1\2 ', text)
@@ -545,10 +570,9 @@ with tab_scrape:
                                 '照片清單': uploaded_file_ids, '新聞連結': full_news['新聞連結']
                             }
                             
-                            # 寫入資料庫
                             if save_raw_to_db(ws_ai_db, record):
                                 success_count += 1
-                            time.sleep(1.0) # 寫入後溫和暫停，保護 API
+                            time.sleep(1.0) 
                                     
                         progress_text.empty()
                         my_bar.empty()
@@ -632,17 +656,30 @@ with tab_ai:
                             gc = gspread.authorize(get_gcp_credentials())
                             ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
                             
-                            del_rows = edited_df[edited_df['🗑️ 刪除']]['_row_idx'].tolist()
-                            if del_rows: delete_rows_from_db(ws_ai_db, del_rows)
+                            del_df = edited_df[edited_df['🗑️ 刪除']]
+                            del_rows = del_df['_row_idx'].tolist()
+                            
+                            if del_rows: 
+                                drive_file_ids_to_delete = []
+                                for idx, row in del_df.iterrows():
+                                    real_row_idx = row['_row_idx']
+                                    orig_row = df_pending[df_pending['_row_idx'] == real_row_idx].iloc[0]
+                                    photos_str = str(orig_row.get('照片清單', ''))
+                                    if photos_str:
+                                        fids = [f.strip() for f in photos_str.split(',') if f.strip()]
+                                        drive_file_ids_to_delete.extend(fids)
+                                
+                                if drive_file_ids_to_delete:
+                                    delete_drive_files(drive_file_ids_to_delete)
+                                    
+                                delete_rows_from_db(ws_ai_db, del_rows)
                                 
                             updates = []
                             for idx, row in edited_df.iterrows():
                                 if not row['🗑️ 刪除']:
                                     orig_full_id = df_pending.loc[idx, '對應題號']
-                                    # 🔥 防呆修改 1：強制轉字串，避免 None 造成錯誤
                                     new_full_id = str(row['對應題號']) 
                                     if orig_full_id != new_full_id:
-                                        # 🔥 防呆修改 2：確保字串內含有 " - " 再執行切割
                                         if " - " in new_full_id:
                                             new_id = new_full_id.split(" - ", 1)[0].strip()
                                             new_title = new_full_id.split(" - ", 1)[1].strip()
@@ -652,7 +689,7 @@ with tab_ai:
                                             
                                         updates.append({'row': row['_row_idx'], 'new_id': new_id, 'new_title': new_title})
                             if updates: update_q_ids_in_db(ws_ai_db, updates)
-                            st.success("✅ 異動儲存完畢！"); time.sleep(1); st.rerun()
+                            st.success("✅ 異動與照片刪除儲存完畢！"); time.sleep(1); st.rerun()
 
                 with c_ai:
                     if st.button("🚀 啟動 Gemini 智慧改寫", type="primary", use_container_width=True):
@@ -673,7 +710,6 @@ with tab_ai:
                                 
                                 for i, (_, row) in enumerate(ai_rows.iterrows()):
                                     real_row_idx = row['_row_idx']
-                                    # 🔥 防呆修改 3：同步保護跑 AI 時的字串切割
                                     new_full_id = str(row['對應題號'])
                                     target_title = new_full_id.split(" - ", 1)[1].strip() if " - " in new_full_id else ""
                                     
@@ -688,7 +724,8 @@ with tab_ai:
                                     if update_ai_summary_by_row(ws_ai_db, real_row_idx, ai_col_idx, ai_summary):
                                         success_ai += 1
                                         
-                                    time.sleep(1.5)
+                                    # 🔥 修改 4：放慢請求節奏，確保遵守 Google API 免費版限制 (15 RPM)
+                                    time.sleep(4.5)
                                     
                                 progress_text2.empty()
                                 bar2.empty()
