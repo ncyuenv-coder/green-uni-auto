@@ -202,19 +202,25 @@ def rename_drive_files(file_ids, new_q_id, news_title, max_retries=3):
     except Exception:
         pass 
 
-def drive_id_to_bytes(file_id):
-    try:
-        creds = get_gcp_credentials()
-        drive_service = build('drive', 'v3', credentials=creds)
-        request = drive_service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done: status, done = downloader.next_chunk()
-        fh.seek(0)
-        return fh
-    except: return None
+# 🔥 修正：為讀取 Drive 檔案加入「智慧重試迴圈」，解決 API 擁塞導致的圖片載入失敗
+def drive_id_to_bytes(file_id, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            creds = get_gcp_credentials()
+            drive_service = build('drive', 'v3', credentials=creds)
+            request = drive_service.files().get_media(fileId=file_id)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done: status, done = downloader.next_chunk()
+            fh.seek(0)
+            return fh
+        except Exception:
+            if attempt < max_retries - 1: time.sleep(random.uniform(1.0, 2.0))
+    return None
 
+# 🔥 修正：加入 st.cache_data 記憶體快取。載入過的圖片瞬間讀取，解決 UI 刪除時的嚴重卡頓！
+@st.cache_data(ttl=86400, show_spinner=False)
 def get_drive_image_b64(file_id):
     fh = drive_id_to_bytes(file_id)
     if fh:
@@ -831,7 +837,6 @@ with tab_view:
                 
             q_options.sort()
             
-            # 🔥 修正：兩段式打包流程，按下按鈕才執行計算，避免資源過載
             st.markdown("#### 📦 全校成果一次打包")
             st.info("💡 貼心提醒：打包全校數十篇新聞需要較多運算資源。請點擊下方按鈕開始產生壓縮檔。")
             
@@ -866,7 +871,6 @@ with tab_view:
                 for idx, row in df_records.iterrows():
                     real_row_idx = row['_row_idx']
                     
-                    # 🔥 修正：加入單篇新聞的刪除按鈕 (解決重複問題)
                     c_title, c_del = st.columns([8, 2])
                     with c_title:
                         st.markdown(f"#### 📰 【新聞】{row['新聞標題']}")
@@ -885,7 +889,7 @@ with tab_view:
                                     
                                 delete_rows_from_db(ws_ai_db, [real_row_idx])
                                 st.success("✅ 該篇新聞與附屬照片已徹底刪除！")
-                                time.sleep(1.0)
+                                # 🔥 修正：拔除 time.sleep 讓介面瞬間刷新
                                 st.rerun()
                     
                     file_ids = str(row.get('照片清單', '')).split(',')
@@ -908,7 +912,7 @@ with tab_view:
                                             ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
                                             update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
                                             st.success("✅ 照片已刪除")
-                                            time.sleep(1.0)
+                                            # 🔥 修正：拔除 time.sleep 讓介面瞬間刷新
                                             st.rerun()
                                 else:
                                     st.error("圖片載入失敗")
