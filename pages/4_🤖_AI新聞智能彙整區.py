@@ -63,19 +63,19 @@ st.markdown("""
     div.stButton > button[kind="secondary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.2em !important; padding: 10px 20px !important; background-color: #8FAAB8 !important; color: white !important; border: none !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     div.stButton > button[kind="secondary"]:hover { background-color: #738A96 !important; }
     
-    /* 🔥 下載按鈕專屬樣式：淺藍底 + 深藍字 */
+    /* 🔥 下載按鈕專屬樣式：莫蘭迪深色調 */
     [data-testid="stDownloadButton"] button { 
-        background-color: #D6EAF8 !important; 
-        color: #154360 !important; 
-        border: 1px solid #AED6F1 !important; 
+        background-color: #5C6B73 !important; 
+        color: #FFFFFF !important; 
+        border: none !important; 
         border-radius: 8px !important; 
         font-weight: bold !important; 
         font-size: 1.2em !important; 
         padding: 12px 24px !important; 
-        box-shadow: 0 3px 5px rgba(0,0,0,0.1) !important; 
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important; 
     }
     [data-testid="stDownloadButton"] button:hover {
-        background-color: #AED6F1 !important;
+        background-color: #45545E !important;
     }
     
     .raw-box { background-color: #FDF6E3; padding: 20px; border-left: 5px solid #E6C27A; border-radius: 6px; height: 500px; overflow-y: auto; line-height: 1.8; font-size: 1.1em; color: #333;}
@@ -152,7 +152,6 @@ def update_ai_summary_by_row(ws, row_idx, ai_col_idx, ai_summary, max_retries=5)
             else: return False
 
 def update_photo_list_by_row(ws, row_idx, new_photo_str, max_retries=3):
-    """更新單筆資料的照片清單欄位 (用於刪除單圖後)"""
     for attempt in range(max_retries):
         try:
             headers = [str(h).strip() for h in ws.get_all_values()[0]]
@@ -164,7 +163,7 @@ def update_photo_list_by_row(ws, row_idx, new_photo_str, max_retries=3):
             else: return False
 
 # ==========================================
-# 🌟 Drive 讀取、寫入與刪除引擎
+# 🌟 Drive 讀取、寫入、命名與刪除引擎
 # ==========================================
 def delete_drive_files(file_ids, max_retries=3):
     if not file_ids: return
@@ -177,6 +176,26 @@ def delete_drive_files(file_ids, max_retries=3):
             for attempt in range(max_retries):
                 try:
                     drive_service.files().delete(fileId=fid).execute()
+                    break
+                except Exception:
+                    if attempt < max_retries - 1: time.sleep(1)
+    except Exception:
+        pass 
+
+def rename_drive_files(file_ids, new_q_id, news_title, max_retries=3):
+    if not file_ids: return
+    try:
+        creds = get_gcp_credentials()
+        drive_service = build('drive', 'v3', credentials=creds)
+        safe_title = re.sub(r'[/\\:*?"<>|]', '', news_title)[:15]
+        for idx, file_id in enumerate(file_ids):
+            fid = file_id.strip()
+            if not fid: continue
+            new_name = f"News_{new_q_id}_{safe_title}_{idx+1}.jpg"
+            file_metadata = {'name': new_name}
+            for attempt in range(max_retries):
+                try:
+                    drive_service.files().update(fileId=fid, body=file_metadata).execute()
                     break
                 except Exception:
                     if attempt < max_retries - 1: time.sleep(1)
@@ -468,7 +487,6 @@ def generate_ai_word_report(q_id, q_title, news_records):
                         except: p2.add_run("(圖檔格式不支援)")
                     else: p2.add_run("(圖載入失敗)")
             
-            # 🔥 於照片表格最下方增加跨欄置中的「新聞標題」
             row_title = table.add_row()
             cell_title = row_title.cells[0]
             cell_title.merge(row_title.cells[1])
@@ -678,7 +696,6 @@ with tab_ai:
             df_pending['下拉選項'] = "【" + df_pending['對應題號'].astype(str) + "】 " + df_pending['新聞標題'].astype(str)
             
             st.markdown(f"#### 📝 尚有 <span style='color:red;'>{len(df_pending)}</span> 筆待處理新聞", unsafe_allow_html=True)
-            st.info("💡 請從下方選單挑選一則新聞，預覽內容後在底部點擊對應的處理按鈕即可。")
             
             selected_news_str = st.selectbox("📌 請選擇要處理的新聞：", df_pending['下拉選項'].tolist())
             
@@ -761,16 +778,22 @@ with tab_ai:
                     
                     if st.button("💾 儲存新題號", use_container_width=True):
                         if new_q_selection != current_full_id:
-                            with st.spinner("正在為您更新對應題號..."):
+                            with st.spinner("正在為您更新對應題號與照片檔名..."):
                                 gc = gspread.authorize(get_gcp_credentials())
                                 ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
                                 
                                 new_id = new_q_selection.split(" - ", 1)[0].strip() if " - " in new_q_selection else new_q_selection.strip()
                                 new_title = new_q_selection.split(" - ", 1)[1].strip() if " - " in new_q_selection else ""
                                 
+                                photos_str = str(target_row.get('照片清單', ''))
+                                if photos_str:
+                                    fids = [f.strip() for f in photos_str.split(',') if f.strip()]
+                                    if fids:
+                                        rename_drive_files(fids, new_id, news_title)
+                                
                                 updates = [{'row': real_row_idx, 'new_id': new_id, 'new_title': new_title}]
                                 if update_q_ids_in_db(ws_ai_db, updates):
-                                    st.success("✅ 題號修改成功！")
+                                    st.success("✅ 題號與雲端照片檔名修改成功！")
                                     time.sleep(1.5)
                                     st.rerun()
                                 else:
@@ -781,7 +804,7 @@ with tab_ai:
                 st.markdown("</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📥 階段三：檢視與下載彙整區 (全新優化排版)
+# 📥 階段三：檢視與下載彙整區
 # ==========================================
 with tab_view:
     st.markdown("<div class='morandi-dark-title'>📥 依題目檢視與打包下載</div>", unsafe_allow_html=True)
@@ -797,7 +820,6 @@ with tab_view:
         if df_completed.empty:
             st.warning("目前尚無完成 AI 摘要的資料，請先至「階段二」執行處理。")
         else:
-            # 加入真實行號，方便針對單張照片刪除時能回寫資料庫
             df_completed['_row_idx'] = df_completed.index + 2
             
             reported_q_ids = df_completed['對應題號'].astype(str).str.strip().unique().tolist()
@@ -809,17 +831,23 @@ with tab_view:
                 
             q_options.sort()
             
-            # 🔥 新增：全部題目彙整下載 (打包 ZIP)
+            # 🔥 修正：兩段式打包流程，按下按鈕才執行計算，避免資源過載
             st.markdown("#### 📦 全校成果一次打包")
-            with st.spinner("打包所有題目 Word 檔中..."):
-                zip_file_bytes = create_all_reports_zip(df_completed)
-            st.download_button(
-                label="📥 全部題目彙整下載 (ZIP 壓縮檔)",
-                data=zip_file_bytes,
-                file_name=f"全校綠色大學AI彙整成果_{datetime.date.today()}.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
+            st.info("💡 貼心提醒：打包全校數十篇新聞需要較多運算資源。請點擊下方按鈕開始產生壓縮檔。")
+            
+            if st.button("⚙️ 產生全校彙整 ZIP 壓縮檔", type="secondary", use_container_width=True):
+                with st.spinner("後台正為您將所有題目的 Word 檔打包中，請稍候..."):
+                    st.session_state['ready_zip'] = create_all_reports_zip(df_completed)
+                    st.success("✅ 打包完成！請點擊下方深色按鈕下載。")
+                    
+            if 'ready_zip' in st.session_state:
+                st.download_button(
+                    label="📥 下載全部題目彙整 (ZIP 壓縮檔)",
+                    data=st.session_state['ready_zip'],
+                    file_name=f"全校綠色大學AI彙整成果_{datetime.date.today()}.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
             
             st.markdown("---")
             st.markdown("#### 🔍 單一題目檢視與下載")
@@ -833,18 +861,36 @@ with tab_view:
                 
                 st.markdown(f"<h2 style='color:#154360;'>📖 {v_q_id} {v_q_title}</h2>", unsafe_allow_html=True)
                 
-                # 🔥 單題多新聞連貫呈現
                 records_to_print = []
                 
                 for idx, row in df_records.iterrows():
                     real_row_idx = row['_row_idx']
-                    st.markdown(f"#### 📰 【新聞】{row['新聞標題']}")
-                    st.caption(f"📅 發布日期：{row['新聞日期']} | 🔗 [點擊查看原始新聞]({row['新聞連結']})")
+                    
+                    # 🔥 修正：加入單篇新聞的刪除按鈕 (解決重複問題)
+                    c_title, c_del = st.columns([8, 2])
+                    with c_title:
+                        st.markdown(f"#### 📰 【新聞】{row['新聞標題']}")
+                        st.caption(f"📅 發布日期：{row['新聞日期']} | 🔗 [點擊查看原始新聞]({row['新聞連結']})")
+                    with c_del:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("🗑️ 刪除此篇新聞", key=f"del_news_tab3_{real_row_idx}", use_container_width=True):
+                            with st.spinner("刪除新聞與雲端照片中..."):
+                                gc = gspread.authorize(get_gcp_credentials())
+                                ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                                
+                                photos_str = str(row.get('照片清單', ''))
+                                if photos_str:
+                                    fids = [f.strip() for f in photos_str.split(',') if f.strip()]
+                                    if fids: delete_drive_files(fids)
+                                    
+                                delete_rows_from_db(ws_ai_db, [real_row_idx])
+                                st.success("✅ 該篇新聞與附屬照片已徹底刪除！")
+                                time.sleep(1.0)
+                                st.rerun()
                     
                     file_ids = str(row.get('照片清單', '')).split(',')
                     file_ids = [fid.strip() for fid in file_ids if fid.strip()]
                     
-                    # 🔥 單獨刪除實體照片功能 (獨立欄位排版)
                     if file_ids:
                         st.markdown("**📸 新聞照片 (點擊下方按鈕可刪除不需要的圖片)**")
                         img_cols = st.columns(4)
@@ -855,9 +901,7 @@ with tab_view:
                                     st.markdown(f"<img src='data:image/jpeg;base64,{b64_img}' style='width:100%; height:200px; object-fit:contain; border-radius:8px; border:1px solid #ddd; margin-bottom:5px;'>", unsafe_allow_html=True)
                                     if st.button("🗑️ 刪除此圖", key=f"del_img_{real_row_idx}_{fid}", use_container_width=True):
                                         with st.spinner("刪除雲端圖片中..."):
-                                            # 從 Drive 刪除
                                             delete_drive_files([fid])
-                                            # 更新 Sheet 
                                             new_file_ids = [f for f in file_ids if f != fid]
                                             new_photo_str = ",".join(new_file_ids)
                                             gc = gspread.authorize(get_gcp_credentials())
@@ -869,21 +913,18 @@ with tab_view:
                                 else:
                                     st.error("圖片載入失敗")
                     
-                    # 🔥 移除原始內文，只留下 AI 摘要
                     st.markdown("**✨ Gemini 濃縮摘要 (含 SDGs)**")
                     fmt_ai = format_report_text_to_html(row['AI摘要'])
                     st.markdown(f"<div style='background-color:#E6F0F9; padding:20px; border-radius:8px; border-left:5px solid #8FAAB8; color:#154360; font-size:1.1em; line-height: 1.6;'>{fmt_ai}</div>", unsafe_allow_html=True)
                     
                     st.markdown("<hr style='border:1px dashed #ccc; margin-top:20px; margin-bottom:20px;'>", unsafe_allow_html=True)
                     
-                    # 準備產 Word 的資料清單
                     records_to_print.append({
                         '新聞標題': row['新聞標題'], '新聞日期': row['新聞日期'],
                         'AI摘要': row['AI摘要'], '照片清單': ",".join(file_ids),
                         '新聞連結': row['新聞連結']
                     })
                     
-                # 產出單題的 Word 下載按鈕
                 with st.spinner("⏳ 產製本題 Word 檔中..."):
                     docx_bytes = generate_ai_word_report(v_q_id, v_q_title, records_to_print)
                     
