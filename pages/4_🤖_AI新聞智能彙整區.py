@@ -94,7 +94,13 @@ def get_gcp_credentials():
 def load_sheet(sheet_name, max_retries=3):
     for attempt in range(max_retries):
         try:
-            return pd.DataFrame(gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet(sheet_name).get_all_records()).rename(columns=lambda x: str(x).strip())
+            ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet(sheet_name)
+            # 🔥 修正：改用 get_all_values() 將所有資料當作「純文字字串」讀取，避免 6.20 被系統擅自閹割成 6.2
+            all_data = ws.get_all_values()
+            if not all_data or len(all_data) < 2:
+                return pd.DataFrame(columns=[str(x).strip() for x in (all_data[0] if all_data else [])])
+            headers = [str(x).strip() for x in all_data[0]]
+            return pd.DataFrame(all_data[1:], columns=headers)
         except Exception:
             if attempt < max_retries - 1: time.sleep(2)
             else: return pd.DataFrame()
@@ -726,7 +732,7 @@ with tab_ai:
                 with col_act1:
                     st.markdown("#### 🚀 模式一：AI 處理")
                     st.write("確認新聞與題目相符，直接交由 Gemini 濃縮摘要。")
-                    if st.button("✨ 啟動 Gemini 智慧改寫", type="primary", use_container_width=True):
+                    if st.button("✨ 啟提 Gemini 智慧改寫", type="primary", use_container_width=True):
                         with st.spinner("呼叫 Gemini 處理中..."):
                             gc = gspread.authorize(get_gcp_credentials())
                             ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
@@ -889,7 +895,6 @@ with tab_view:
                                 st.success("✅ 該篇新聞與附屬照片已徹底刪除！")
                                 st.rerun()
                     
-                    # 🔥 自動偵測失效照片並自癒清理的機制
                     raw_file_ids = str(row.get('照片清單', '')).split(',')
                     raw_file_ids = [fid.strip() for fid in raw_file_ids if fid.strip()]
                     
@@ -906,16 +911,13 @@ with tab_view:
                             else:
                                 failed_fids.append(fid)
                                 
-                        # 如果有載入失敗的照片，立即從資料庫與雲端抹除，實踐自癒
                         if failed_fids:
                             new_photo_str = ",".join(valid_fids)
                             gc = gspread.authorize(get_gcp_credentials())
                             ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
                             update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
-                            # 順手清一下雲端，防止是因為檔案權限異常而非真遺失
                             delete_drive_files(failed_fids)
                         
-                        # 只渲染真正健康有效的照片
                         if valid_fids:
                             st.markdown("**📸 新聞照片 (點擊下方按鈕可刪除不需要的圖片)**")
                             img_cols = st.columns(4)
@@ -939,7 +941,6 @@ with tab_view:
                     
                     st.markdown("<hr style='border:1px dashed #ccc; margin-top:20px; margin-bottom:20px;'>", unsafe_allow_html=True)
                     
-                    # 報表生成也只納入健康的照片，確保不會有報錯字樣
                     records_to_print.append({
                         '新聞標題': row['新聞標題'], '新聞日期': row['新聞日期'],
                         'AI摘要': row['AI摘要'], '照片清單': ",".join(valid_fids),
