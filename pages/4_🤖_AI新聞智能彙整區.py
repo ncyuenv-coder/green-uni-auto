@@ -45,7 +45,8 @@ NEWS_IMG_FOLDER_ID = "1VNOna4gRdtTIiFPc4XqMJU2jP01LcyXM"
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
-    ai_model = genai.GenerativeModel('gemini-2.0-flash') 
+    # ⚡ 替換為專為高頻率、文字摘要打造的輕量化模型，避免 429 錯誤且速度更快
+    ai_model = genai.GenerativeModel('gemini-1.5-flash-8b') 
 except Exception as e:
     st.error(f"⚠️ 無法載入 Gemini API Key，或設定有誤：{e}")
     st.stop()
@@ -102,11 +103,14 @@ def delete_rows_from_db(ws, row_indices, max_retries=3):
     for attempt in range(max_retries):
         try:
             for r_idx in sorted(row_indices, reverse=True):
-                ws.delete_rows(r_idx)
+                # 強制轉換 r_idx 為原生 int，解決 numpy.int64 導致的序列化失敗問題
+                ws.delete_row(int(r_idx))
             return True
-        except Exception:
+        except Exception as e:
             if attempt < max_retries - 1: time.sleep(2)
-            else: return False
+            else: 
+                st.error(f"Sheet 刪除失敗: {e}")
+                return False
 
 def update_q_ids_in_db(ws, updates, max_retries=3):
     for attempt in range(max_retries):
@@ -116,8 +120,9 @@ def update_q_ids_in_db(ws, updates, max_retries=3):
             q_title_col = headers.index('中文標題') + 1
             cells = []
             for u in updates:
-                cells.append(gspread.Cell(row=u['row'], col=q_id_col, value=str(u['new_id'])))
-                cells.append(gspread.Cell(row=u['row'], col=q_title_col, value=str(u['new_title'])))
+                # 強制轉換 row 和 col 為原生 int
+                cells.append(gspread.Cell(row=int(u['row']), col=int(q_id_col), value=str(u['new_id'])))
+                cells.append(gspread.Cell(row=int(u['row']), col=int(q_title_col), value=str(u['new_title'])))
             ws.update_cells(cells)
             return True
         except Exception:
@@ -127,7 +132,8 @@ def update_q_ids_in_db(ws, updates, max_retries=3):
 def update_ai_summary_by_row(ws, row_idx, ai_col_idx, ai_summary, max_retries=5):
     for attempt in range(max_retries):
         try:
-            ws.update_cell(row_idx, ai_col_idx, str(ai_summary))
+            # 強制轉換 row 和 col 為原生 int
+            ws.update_cell(int(row_idx), int(ai_col_idx), str(ai_summary))
             return True
         except Exception:
             if attempt < max_retries - 1: time.sleep(random.uniform(2.0, 5.0))
@@ -657,10 +663,17 @@ with tab_ai:
                             
                             ai_summary = process_news_with_ai(news_item, target_title)
                             
-                            if update_ai_summary_by_row(ws_ai_db, real_row_idx, ai_col_idx, ai_summary):
-                                st.success("🎉 完成！成功生成新聞摘要並寫入資料庫！")
-                                time.sleep(1.5)
-                                st.rerun()
+                            # 攔截寫入 Google Sheet 動作，若 AI 回傳錯誤直接顯示警告
+                            if "❌ 系統錯誤" in ai_summary or "⚠️" in ai_summary:
+                                st.error(f"AI 處理失敗，請稍後再試：\n{ai_summary}")
+                            else:
+                                if update_ai_summary_by_row(ws_ai_db, real_row_idx, ai_col_idx, ai_summary):
+                                    st.success("🎉 完成！成功生成新聞摘要並寫入資料庫！")
+                                    # 防 429 機制，給予 API 緩衝時間
+                                    time.sleep(4.5)
+                                    st.rerun()
+                                else:
+                                    st.error("❌ 寫入資料庫失敗，請檢查網路連線。")
                                 
                     st.markdown("---")
                     st.markdown("#### 🗑️ 模式二：刪除廢棄")
@@ -676,11 +689,14 @@ with tab_ai:
                                 fids = [f.strip() for f in photos_str.split(',') if f.strip()]
                                 if fids: delete_drive_files(fids)
                                 
-                            # 刪除 Sheet 上的資料列
-                            delete_rows_from_db(ws_ai_db, [real_row_idx])
-                            st.success("✅ 該篇新聞與附屬的雲端照片皆已徹底刪除！")
-                            time.sleep(1.5)
-                            st.rerun()
+                            # 刪除 Sheet 上的資料列 (加入成功與否的判斷)
+                            success_del = delete_rows_from_db(ws_ai_db, [real_row_idx])
+                            if success_del:
+                                st.success("✅ 該篇新聞與附屬的雲端照片皆已徹底刪除！")
+                                time.sleep(1.5)
+                                st.rerun()
+                            else:
+                                st.error("❌ Google Sheet 資料刪除失敗，請再試一次。")
                             
                 with col_act2:
                     st.markdown("#### ✏️ 模式三：修改題號")
@@ -707,6 +723,8 @@ with tab_ai:
                                     st.success("✅ 題號修改成功！")
                                     time.sleep(1.5)
                                     st.rerun()
+                                else:
+                                    st.error("❌ 題號修改寫入失敗。")
                         else:
                             st.warning("您選擇的題號與目前相同，無須修改喔！")
                 
