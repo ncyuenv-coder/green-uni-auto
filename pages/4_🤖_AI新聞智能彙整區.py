@@ -45,8 +45,8 @@ NEWS_IMG_FOLDER_ID = "1VNOna4gRdtTIiFPc4XqMJU2jP01LcyXM"
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
-    # 🔥 修正：退回支援度最高的 gemini-1.5-flash 模型，避免 404 找不到模型，且免費額度充足
-    ai_model = genai.GenerativeModel('gemini-1.5-flash') 
+    # 🔥 修正：依照您其他專案的成功經驗，使用最新且極具成本效益的 2.5-flash-lite 模型
+    ai_model = genai.GenerativeModel('gemini-2.5-flash-lite') 
 except Exception as e:
     st.error(f"⚠️ 無法載入 Gemini API Key，或設定有誤：{e}")
     st.stop()
@@ -103,7 +103,7 @@ def delete_rows_from_db(ws, row_indices, max_retries=3):
     for attempt in range(max_retries):
         try:
             for r_idx in sorted(row_indices, reverse=True):
-                # 🔥 修正：使用正確的 delete_rows 語法，並保留 int() 防護
+                # 🔥 修正：使用正確的新版 delete_rows 語法，取代已被廢棄的 delete_row
                 ws.delete_rows(int(r_idx))
             return True
         except Exception as e:
