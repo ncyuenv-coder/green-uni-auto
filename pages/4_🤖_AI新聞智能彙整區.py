@@ -45,8 +45,8 @@ NEWS_IMG_FOLDER_ID = "1VNOna4gRdtTIiFPc4XqMJU2jP01LcyXM"
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
-    # ⚡ 替換為專為高頻率、文字摘要打造的輕量化模型，避免 429 錯誤且速度更快
-    ai_model = genai.GenerativeModel('gemini-1.5-flash-8b') 
+    # 🔥 修正：退回支援度最高的 gemini-1.5-flash 模型，避免 404 找不到模型，且免費額度充足
+    ai_model = genai.GenerativeModel('gemini-1.5-flash') 
 except Exception as e:
     st.error(f"⚠️ 無法載入 Gemini API Key，或設定有誤：{e}")
     st.stop()
@@ -103,8 +103,8 @@ def delete_rows_from_db(ws, row_indices, max_retries=3):
     for attempt in range(max_retries):
         try:
             for r_idx in sorted(row_indices, reverse=True):
-                # 強制轉換 r_idx 為原生 int，解決 numpy.int64 導致的序列化失敗問題
-                ws.delete_row(int(r_idx))
+                # 🔥 修正：使用正確的 delete_rows 語法，並保留 int() 防護
+                ws.delete_rows(int(r_idx))
             return True
         except Exception as e:
             if attempt < max_retries - 1: time.sleep(2)
@@ -120,7 +120,6 @@ def update_q_ids_in_db(ws, updates, max_retries=3):
             q_title_col = headers.index('中文標題') + 1
             cells = []
             for u in updates:
-                # 強制轉換 row 和 col 為原生 int
                 cells.append(gspread.Cell(row=int(u['row']), col=int(q_id_col), value=str(u['new_id'])))
                 cells.append(gspread.Cell(row=int(u['row']), col=int(q_title_col), value=str(u['new_title'])))
             ws.update_cells(cells)
@@ -132,7 +131,6 @@ def update_q_ids_in_db(ws, updates, max_retries=3):
 def update_ai_summary_by_row(ws, row_idx, ai_col_idx, ai_summary, max_retries=5):
     for attempt in range(max_retries):
         try:
-            # 強制轉換 row 和 col 為原生 int
             ws.update_cell(int(row_idx), int(ai_col_idx), str(ai_summary))
             return True
         except Exception:
