@@ -112,7 +112,6 @@ def get_file_info(file_id, desc=""):
         fh.seek(0)
         file_bytes = fh.read()
         
-        # 判斷照片比例：長式、橫式、橫幅(超寬)
         is_landscape = True
         is_panorama = False
         if is_image:
@@ -172,10 +171,7 @@ def generate_html_image_table(enriched_files_dict):
         slots_filled = 0
         
         for f in images:
-            # 判斷該照片需佔據的欄位數
             slots_needed = 2 if f.get('is_panorama') else 1
-            
-            # 如果目前列放不下，就補滿剩下的空格，並開啟新的一列
             if slots_filled + slots_needed > 4:
                 for _ in range(4 - slots_filled):
                     table_html += "<td style='border:1px solid #D9E0E3; width:25%;'></td>"
@@ -185,10 +181,8 @@ def generate_html_image_table(enriched_files_dict):
             width_pct = 50 if slots_needed == 2 else 25
             img_height = "auto" if slots_needed == 2 else "200px"
             table_html += f"<td colspan='{slots_needed}' style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:top; width:{width_pct}%;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='width:100%; height:{img_height}; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
-            
             slots_filled += slots_needed
 
-        # 迴圈結束後，補滿最後一列的剩餘空格
         if 0 < slots_filled < 4:
             for _ in range(4 - slots_filled):
                 table_html += "<td style='border:1px solid #D9E0E3; width:25%;'></td>"
@@ -198,7 +192,7 @@ def generate_html_image_table(enriched_files_dict):
     return table_html
 
 def add_images_to_word_table(doc, enriched_files_dict):
-    """Word 產製：照片與文字分離成2列，超寬照片跨欄置中，嚴格控制長寬尺寸"""
+    """Word 產製：照片與文字分離成2列，超寬照片跨欄置中，同類照片優先並排，嚴格控制長寬尺寸"""
     has_image = any(f.get('is_image') for files in enriched_files_dict.values() for f in files)
     if not has_image: return
     
@@ -217,26 +211,51 @@ def add_images_to_word_table(doc, enriched_files_dict):
             p = cell.paragraphs[0]
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.add_run(section_title).bold = True
-        
-        current_row_items = []
-        slots_filled = 0
-        
-        def flush_word_row():
-            nonlocal current_row_items, slots_filled
-            if not current_row_items: return
             
+        # 🔥 智慧分類：將照片依比例拆分，優先同類合併
+        panoramas = [f for f in images if f.get('is_panorama')]
+        landscapes = [f for f in images if f.get('is_landscape') and not f.get('is_panorama')]
+        portraits = [f for f in images if not f.get('is_landscape')]
+        
+        # 準備排版區塊 (Chunk)
+        chunks = []
+        
+        # 1. 橫幅全寬照片 (每列 1 張，佔據 2 格)
+        for p_img in panoramas:
+            chunks.append(([p_img], 2))
+            
+        # 2. 橫式照片 (每列 2 張)
+        for i in range(0, len(landscapes) - 1, 2):
+            chunks.append((landscapes[i:i+2], 1))
+        rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
+        
+        # 3. 直式照片 (每列 2 張)
+        for i in range(0, len(portraits) - 1, 2):
+            chunks.append((portraits[i:i+2], 1))
+        rem_p = portraits[-1] if len(portraits) % 2 != 0 else None
+        
+        # 4. 處理剩下的單張照片 (若直橫各剩一張才並列，否則單獨放一列)
+        if rem_l and rem_p:
+            chunks.append(([rem_l, rem_p], 1))
+        elif rem_l:
+            chunks.append(([rem_l], 1))
+        elif rem_p:
+            chunks.append(([rem_p], 1))
+
+        # 開始繪製 Word 表格
+        for chunk_files, slots_type in chunks:
             row_img = table.add_row()
             row_desc = table.add_row()
             
-            # 情況 1: 該列只有 1 張全寬(橫幅)照片
-            if len(current_row_items) == 1 and current_row_items[0][1] == 2:
-                f = current_row_items[0][0]
+            # 若為超寬橫幅照片
+            if slots_type == 2:
+                f = chunk_files[0]
                 cell_img = row_img.cells[0]
                 cell_img.merge(row_img.cells[1])
                 cell_desc = row_desc.cells[0]
                 cell_desc.merge(row_desc.cells[1])
                 
-                # 插入跨欄置中圖片
+                # 插入圖片
                 cell_img.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 p_img = cell_img.paragraphs[0]
                 p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -245,22 +264,22 @@ def add_images_to_word_table(doc, enriched_files_dict):
                     inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(15.5))
                 except: p_img.add_run("(圖片無法插入)")
                 
-                # 插入跨欄文字說明
+                # 插入說明
                 cell_desc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 p_desc = cell_desc.paragraphs[0]
                 p_desc.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p_desc.add_run(f"{f['desc']}")
                 
-            # 情況 2: 該列有 1~2 張一般尺寸照片
+            # 若為一般橫式或直式照片
             else:
-                for idx in range(2):
-                    cell_img = row_img.cells[idx]
-                    cell_desc = row_desc.cells[idx]
+                for j in range(2):
+                    cell_img = row_img.cells[j]
+                    cell_desc = row_desc.cells[j]
                     cell_img.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     cell_desc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     
-                    if idx < len(current_row_items):
-                        f = current_row_items[idx][0]
+                    if j < len(chunk_files):
+                        f = chunk_files[j]
                         
                         # 插入圖片並嚴格控制尺寸
                         p_img = cell_img.paragraphs[0]
@@ -268,37 +287,15 @@ def add_images_to_word_table(doc, enriched_files_dict):
                         try:
                             img_bytes = base64.b64decode(f['b64'])
                             if f.get('is_landscape'):
-                                # 橫式：高 5.5 公分，寬 7.5 公分
-                                inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5), height=Cm(5.5))
+                                p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5), height=Cm(5.5))
                             else:
-                                # 長式：高 9 公分，寬 7 公分
-                                inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.0), height=Cm(9.0))
+                                p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.0), height=Cm(9.0))
                         except: p_img.add_run("(圖片無法插入)")
                         
-                        # 插入獨立一格的文字說明
+                        # 插入說明
                         p_desc = cell_desc.paragraphs[0]
                         p_desc.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         p_desc.add_run(f"{f['desc']}")
-            
-            # 清空緩存
-            current_row_items.clear()
-            slots_filled = 0
-
-        # 將影像逐一打包進排版佇列
-        for f in images:
-            slots_needed = 2 if f.get('is_panorama') else 1
-            if slots_filled + slots_needed > 2:
-                flush_word_row()
-            
-            current_row_items.append((f, slots_needed))
-            slots_filled += slots_needed
-            
-            if slots_filled == 2:
-                flush_word_row()
-                
-        # 收尾尚未滿列的項目
-        if current_row_items:
-            flush_word_row()
 
 def set_run_font(run):
     run.font.name = 'Times New Roman'
@@ -317,7 +314,11 @@ def extract_single_question_data(v_q_id, df_q, df_r):
         df_q_records['填報時間'] = pd.to_datetime(df_q_records['填報時間'])
         df_q_records = df_q_records.sort_values('填報時間').drop_duplicates(subset=['權責單位'], keep='last')
     
-    info_strings = []; combined_reqs = ""; combined_texts = ""; unit_files_dict = {}
+    info_strings_ui = []   # 給網頁顯示用 (有 Icon)
+    info_strings_word = [] # 給 Word 匯出用 (無 Icon)
+    combined_reqs = ""
+    combined_texts = ""
+    unit_files_dict = {}
     unit_count = len(df_q_records)
     
     for idx, row in df_q_records.iterrows():
@@ -325,7 +326,10 @@ def extract_single_question_data(v_q_id, df_q, df_r):
         rep = str(row.get('填報人', '無')).strip()
         ext = str(row.get('填報人分機', '無')).strip()
         em = str(row.get('填報人電子郵件', '無')).strip()
-        info_strings.append(f"填報單位：{u}  |  👤 填報人：{rep}  |  📞 分機：{ext}  |  📧 Email：{em}")
+        
+        # 🔥 分流：區分 UI 顯示與 Word 匯出的純淨版本
+        info_strings_ui.append(f"填報單位：{u}  |  👤 填報人：{rep}  |  📞 分機：{ext}  |  📧 Email：{em}")
+        info_strings_word.append(f"填報單位：{u}  |  填報人：{rep}  |  分機：{ext}  |  Email：{em}")
         
         q_match_unit = df_q[(df_q['當年度題目'].astype(str).str.strip() == v_q_id) & (df_q['權責單位'].astype(str).str.strip() == u)]
         req_text = str(q_match_unit.iloc[0].get('資料需求', '無特別說明')) if not q_match_unit.empty else (str(q_match_base.iloc[0].get('資料需求', '無')) if not q_match_base.empty else "無")
@@ -352,12 +356,14 @@ def extract_single_question_data(v_q_id, df_q, df_r):
         enriched = [get_file_info(f['id'], f['desc']) for f in files]
         unit_enriched_files[f"【{u}】"] = [e for e in enriched if e]
         
-    return v_q_title, v_desc_text, info_strings, combined_reqs.strip(), combined_texts.strip(), unit_enriched_files
+    return v_q_title, v_desc_text, info_strings_ui, info_strings_word, combined_reqs.strip(), combined_texts.strip(), unit_enriched_files
 
-def build_word_document(v_q_id, v_q_title, info_strings, desc_text, req_text, report_text, unit_enriched_files):
+def build_word_document(v_q_id, v_q_title, info_strings_word, desc_text, req_text, report_text, unit_enriched_files):
     doc = Document()
     doc.add_heading(f'嘉大綠色大學填報成果彙整', 0)
-    for info in info_strings: doc.add_paragraph(info).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    for info in info_strings_word: 
+        doc.add_paragraph(info).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        
     doc.add_heading(f'{v_q_id} {v_q_title}', level=1)
     
     doc.add_heading('題目說明：', level=2)
@@ -515,10 +521,10 @@ with tab_download:
                 v_q_id = view_item.split(" - ")[0]
                 
                 with st.spinner("⏳ 正在拉取資料與雲端圖片，請稍候..."):
-                    v_q_title, v_desc_text, info_strings, combined_reqs, combined_texts, unit_enriched_files = extract_single_question_data(v_q_id, df_q, df_r)
+                    v_q_title, v_desc_text, info_strings_ui, info_strings_word, combined_reqs, combined_texts, unit_enriched_files = extract_single_question_data(v_q_id, df_q, df_r)
                 
                 st.markdown("---")
-                for info in info_strings:
+                for info in info_strings_ui:
                     st.markdown(f"<div style='color: #555555; font-size: 1.15em; margin-bottom: 5px; font-weight: bold;'>{info}</div>", unsafe_allow_html=True)
                 
                 st.markdown(f"<div class='morandi-question-title'>📖 {v_q_id}：{v_q_title}</div>", unsafe_allow_html=True)
@@ -545,7 +551,7 @@ with tab_download:
                 st.markdown("<div style='text-align: center; margin-top: 30px; margin-bottom: 10px;'><b>準備好彙整這份報告了嗎？</b></div>", unsafe_allow_html=True)
                 
                 with st.spinner("⏳ 正在為您產生 Word 報告檔案..."):
-                    docx_bytes = build_word_document(v_q_id, v_q_title, info_strings, v_desc_text, combined_reqs, combined_texts, unit_enriched_files)
+                    docx_bytes = build_word_document(v_q_id, v_q_title, info_strings_word, v_desc_text, combined_reqs, combined_texts, unit_enriched_files)
                 
                 col_dl1, col_dl2, col_dl3 = st.columns([3, 4, 3])
                 with col_dl2:
@@ -572,8 +578,8 @@ with tab_download:
                         for i, qid in enumerate(reported_q_ids):
                             status_text.text(f"正在處理第 {i+1}/{total_q} 題：{qid} ...")
                             
-                            v_q_title, v_desc_text, info_strings, combined_reqs, combined_texts, unit_enriched_files = extract_single_question_data(qid, df_q, df_r)
-                            docx_bytes = build_word_document(qid, v_q_title, info_strings, v_desc_text, combined_reqs, combined_texts, unit_enriched_files)
+                            v_q_title, v_desc_text, info_strings_ui, info_strings_word, combined_reqs, combined_texts, unit_enriched_files = extract_single_question_data(qid, df_q, df_r)
+                            docx_bytes = build_word_document(qid, v_q_title, info_strings_word, v_desc_text, combined_reqs, combined_texts, unit_enriched_files)
                             
                             safe_title = re.sub(r'[\\/*?:"<>|]', "", v_q_title) 
                             file_name = f"{qid}_{safe_title}_填報彙整.docx"
