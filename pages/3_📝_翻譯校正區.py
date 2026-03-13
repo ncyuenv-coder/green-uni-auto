@@ -12,6 +12,11 @@ if st.session_state.get("authentication_status") is not True:
     st.warning("⚠️ 請先至首頁登入系統！")
     st.stop()
 
+# 🔥 新增：僅限 admin_ui 檢視與管理
+if st.session_state.get("username") != "admin_ui":
+    st.error("🚫 權限不足！此頁面僅限系統管理員 (admin_ui) 存取。")
+    st.stop()
+
 st.set_page_config(page_title="嘉大綠色大學翻譯校正", page_icon="🌍", layout="wide")
 
 # 初始化跳轉與進度記憶
