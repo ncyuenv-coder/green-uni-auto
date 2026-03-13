@@ -111,21 +111,10 @@ def get_file_info(file_id, desc=""):
             status, done = downloader.next_chunk()
         fh.seek(0)
         file_bytes = fh.read()
-        
-        is_landscape = True
-        is_panorama = False
-        if is_image:
-            try:
-                img = Image.open(io.BytesIO(file_bytes))
-                ratio = img.width / img.height
-                if ratio < 1.0: is_landscape = False
-                if ratio >= 1.9: is_panorama = True 
-            except Exception: pass
             
         b64_str = base64.b64encode(file_bytes).decode('utf-8') if is_image else ""
         return {
             'id': file_id, 'desc': desc, 'is_pdf': is_pdf, 'is_image': is_image, 
-            'is_landscape': is_landscape, 'is_panorama': is_panorama, 
             'b64': b64_str, 'mime_type': mime_type
         }
     except Exception: 
@@ -155,6 +144,7 @@ def format_report_text_to_html(text):
     return html.replace('\n', ' ')
 
 def generate_html_image_table(enriched_files_dict):
+    """UI 呈現：4張照片並列顯示，下方放照片說明文字"""
     has_image = any(f.get('is_image') for files in enriched_files_dict.values() for f in files)
     if not has_image: return ""
     
@@ -163,49 +153,44 @@ def generate_html_image_table(enriched_files_dict):
         images = [f for f in files if f.get('is_image')]
         if not images: continue
         
-        if len(enriched_files_dict) > 1 or "新聞" in section_title:
-            table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:10px; text-align:center; background-color:#E6F0F9;'><strong style='font-size:1.2em; color:#154360;'>{section_title}</strong></td></tr>"
+        if len(enriched_files_dict) > 1:
+            table_html += f"<tr><td colspan='4' style='border:1px solid #D9E0E3; padding:10px; text-align:center; background-color:#E6F0F9;'><strong style='font-size:1.2em; color:#154360;'>{section_title}</strong></td></tr>"
         
-        panoramas = [f for f in images if f.get('is_panorama')]
-        landscapes = [f for f in images if f.get('is_landscape') and not f.get('is_panorama')]
-        portraits = [f for f in images if not f.get('is_landscape')]
-        
-        for pano in panoramas:
-            table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:middle;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
-        
-        pairs = []
-        for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
-        rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
-        for i in range(0, len(portraits) - 1, 2): pairs.append((portraits[i], portraits[i+1]))
-        rem_p = portraits[-1] if len(portraits) % 2 != 0 else None
-        
-        if rem_l and rem_p: pairs.append((rem_l, rem_p))
-        elif rem_l: pairs.append((rem_l, None))
-        elif rem_p: pairs.append((rem_p, None))
-        
-        for p1, p2 in pairs:
+        # 每 4 張照片為一列
+        for i in range(0, len(images), 4):
+            chunk = images[i:i+4]
             table_html += "<tr>"
-            for f in [p1, p2]:
-                if f:
-                    ratio = "7.5/5.5" if f['is_landscape'] else "7/9"
-                    table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; width:50%; vertical-align:middle;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='aspect-ratio:{ratio}; width:100%; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
-                else:
-                    table_html += "<td style='border:1px solid #D9E0E3; width:50%;'></td>"
+            
+            for f in chunk:
+                table_html += f"""
+                <td style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:top; width:25%;'>
+                    <img src='data:{f['mime_type']};base64,{f['b64']}' style='width:100%; height:200px; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br>
+                    <b>{f['desc']}</b>
+                </td>
+                """
+            
+            # 填補剩下的空格維持表格結構
+            for _ in range(4 - len(chunk)):
+                table_html += "<td style='border:1px solid #D9E0E3; width:25%;'></td>"
+                
             table_html += "</tr>"
+            
     table_html += "</table>"
     return table_html
 
 def add_images_to_word_table(doc, enriched_files_dict):
+    """Word 產製：改為照片一列、照片說明文字緊接一列 (2欄並排)"""
     has_image = any(f.get('is_image') for files in enriched_files_dict.values() for f in files)
     if not has_image: return
     
     table = doc.add_table(rows=0, cols=2)
     table.style = 'Table Grid'
+    
     for section_title, files in enriched_files_dict.items():
         images = [f for f in files if f.get('is_image')]
         if not images: continue
         
-        if len(enriched_files_dict) > 1 or "新聞" in section_title:
+        if len(enriched_files_dict) > 1:
             row = table.add_row()
             cell = row.cells[0]
             cell.merge(row.cells[1])
@@ -214,53 +199,37 @@ def add_images_to_word_table(doc, enriched_files_dict):
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.add_run(section_title).bold = True
         
-        panoramas = [f for f in images if f.get('is_panorama')]
-        landscapes = [f for f in images if f.get('is_landscape') and not f.get('is_panorama')]
-        portraits = [f for f in images if not f.get('is_landscape')]
-        
-        for pano in panoramas:
-            row = table.add_row()
-            cell = row.cells[0]
-            cell.merge(row.cells[1])
-            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            p_img = cell.paragraphs[0]
-            p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            try:
-                img_bytes = base64.b64decode(pano['b64'])
-                inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(15.5))
-                try:
-                    spPr = inline._inline.xpath('.//pic:spPr')[0]
-                    spPr.append(parse_xml('<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'))
-                except: pass
-            except: p_img.add_run("(圖片無法插入)")
-            cell.add_paragraph(f"{pano['desc']}").alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        pairs = []
-        for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
-        rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
-        for i in range(0, len(portraits) - 1, 2): pairs.append((portraits[i], portraits[i+1]))
-        rem_p = portraits[-1] if len(portraits) % 2 != 0 else None
-        if rem_l and rem_p: pairs.append((rem_l, rem_p)) 
-        elif rem_l: pairs.append((rem_l, None))
-        elif rem_p: pairs.append((rem_p, None))
-        
-        for p1, p2 in pairs:
-            row = table.add_row()
-            for idx, f in enumerate([p1, p2]):
-                cell = row.cells[idx]
-                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                if f:
-                    p_img = cell.paragraphs[0]
+        # 兩張照片一列，對應的說明在緊接的下一列
+        for i in range(0, len(images), 2):
+            chunk = images[i:i+2]
+            
+            row_img = table.add_row()
+            row_desc = table.add_row()
+            
+            for j in range(2):
+                cell_img = row_img.cells[j]
+                cell_img.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                cell_desc = row_desc.cells[j]
+                cell_desc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                
+                if j < len(chunk):
+                    f = chunk[j]
+                    # 插入圖片列
+                    p_img = cell_img.paragraphs[0]
                     p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     try:
                         img_bytes = base64.b64decode(f['b64'])
-                        inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5) if f['is_landscape'] else Cm(7.0), height=Cm(5.5) if f['is_landscape'] else Cm(9.0))
+                        inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5))
                         try:
                             spPr = inline._inline.xpath('.//pic:spPr')[0]
                             spPr.append(parse_xml('<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'))
                         except: pass
                     except: p_img.add_run("(圖片無法插入)")
-                    cell.add_paragraph(f"{f['desc']}").alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+                    # 插入獨立的文字說明列
+                    p_desc = cell_desc.paragraphs[0]
+                    p_desc.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p_desc.add_run(f"{f['desc']}")
 
 def set_run_font(run):
     run.font.name = 'Times New Roman'
@@ -269,7 +238,7 @@ def set_run_font(run):
 # ==========================================
 # 🌟 核心資料處理與 Word 產製流程
 # ==========================================
-def extract_single_question_data(v_q_id, df_q, df_r, df_news):
+def extract_single_question_data(v_q_id, df_q, df_r):
     q_match_base = df_q[df_q['當年度題目'].astype(str).str.strip() == v_q_id]
     v_q_title = str(q_match_base.iloc[0]['中文標題']).strip() if not q_match_base.empty else "未知標題"
     v_desc_text = str(q_match_base.iloc[0].get('中文說明', '無')).replace('中文說明：', '').strip() if not q_match_base.empty else "無"
@@ -299,13 +268,11 @@ def extract_single_question_data(v_q_id, df_q, df_r, df_news):
         else:
             combined_reqs = req_text; combined_texts = rep_text
             
-        # [防呆修正] 強制提取雲端純 ID，避免網址造成錯誤
         files_for_u = []
         for i in range(1, 11):
             raw_id = str(row.get(f'檔案{i}_ID', '')).strip()
             desc = str(row.get(f'檔案{i}_說明', '')).strip()
             if raw_id:
-                # 尋找連續25個以上的英數符號作為ID
                 id_match = re.search(r'[-\w]{25,}', raw_id)
                 if id_match:
                     files_for_u.append({'id': id_match.group(0), 'desc': desc})
@@ -316,46 +283,15 @@ def extract_single_question_data(v_q_id, df_q, df_r, df_news):
         enriched = [get_file_info(f['id'], f['desc']) for f in files]
         unit_enriched_files[f"【{u}】"] = [e for e in enriched if e]
         
-    news_data = []
-    if not df_news.empty:
-        target_col_idx = 0
-        for i, col in enumerate(df_news.columns[:5]):
-            if '題' in str(col) or '指標' in str(col):
-                target_col_idx = i
-                break
-        
-        for _, row in df_news.iterrows():
-            row_id = str(row.iloc[target_col_idx]).strip()
-            ids = [x.strip() for x in re.split(r'[,、/，\s]+', row_id) if x.strip()]
-            
-            if v_q_id in ids:
-                n_title = str(row.iloc[4]).strip() if len(row.index) > 4 else ""
-                n_summary = str(row.iloc[6]).strip() if len(row.index) > 6 else ""
-                n_photos_str = str(row.iloc[7]).strip() if len(row.index) > 7 else ""
-                n_link = str(row.iloc[8]).strip() if len(row.index) > 8 else ""
-                
-                if not n_title and not n_summary: continue
-                
-                file_ids = re.findall(r'[-\w]{25,}', n_photos_str)
-                n_enriched = [get_file_info(fid, f"新聞配圖 {i+1}") for i, fid in enumerate(file_ids)]
-                
-                news_data.append({
-                    'title': n_title,
-                    'summary': n_summary,
-                    'link': n_link,
-                    'enriched_files': [e for e in n_enriched if e]
-                })
-                
-    return v_q_title, v_desc_text, info_strings, combined_reqs.strip(), combined_texts.strip(), unit_enriched_files, news_data
+    return v_q_title, v_desc_text, info_strings, combined_reqs.strip(), combined_texts.strip(), unit_enriched_files
 
-def build_word_document(v_q_id, v_q_title, info_strings, desc_text, req_text, report_text, unit_enriched_files, news_data):
+def build_word_document(v_q_id, v_q_title, info_strings, desc_text, req_text, report_text, unit_enriched_files):
     doc = Document()
     doc.add_heading(f'嘉大綠色大學填報成果彙整', 0)
     for info in info_strings: doc.add_paragraph(info).alignment = WD_ALIGN_PARAGRAPH.RIGHT
     doc.add_heading(f'{v_q_id} {v_q_title}', level=1)
     
     doc.add_heading('題目說明：', level=2)
-    # [修正] 確保全部使用獨立 paragraph (Enter換行)，避免 Shift+Enter 造成對齊跑版
     for line in str(desc_text).replace('\r', '').split('\n'):
         if line.strip(): doc.add_paragraph(line.strip())
         
@@ -394,26 +330,7 @@ def build_word_document(v_q_id, v_q_title, info_strings, desc_text, req_text, re
     
     if not any(f.get('is_image') for files in unit_enriched_files.values() for f in files) and not has_any_doc:
         doc.add_paragraph("此紀錄無上傳任何單位附件。")
-        
-    # 加入新聞亮點與照片至 Word 文件最下方
-    if news_data:
-        doc.add_heading('相關新聞亮點與佐證：', level=2)
-        for idx, news in enumerate(news_data):
-            doc.add_paragraph(f"【新聞 {idx+1}】 {news['title']}").runs[0].bold = True
-            
-            doc.add_paragraph("亮點摘要：").runs[0].bold = True
-            for line in news['summary'].replace('\r', '').split('\n'):
-                if line.strip(): doc.add_paragraph(line.strip())
-            
-            if news['link'] and news['link'] != 'nan':
-                p_link = doc.add_paragraph()
-                p_link.add_run("新聞連結：").bold = True
-                p_link.add_run(news['link'])
-                
-            if news['enriched_files']:
-                add_images_to_word_table(doc, {f"【新聞 {idx+1} 圖片】": news['enriched_files']})
     
-    # 執行左右對齊，由於全面改用 Hard Enter，格式不會跑掉
     for p in doc.paragraphs:
         if not p.style.name.startswith('Heading'): p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         for r in p.runs: set_run_font(r)
@@ -504,7 +421,6 @@ with tab_missing:
 with tab_download:
     df_r = load_gsheet_data("填報資料庫")
     df_q = load_gsheet_data("評比題目表")
-    df_news = load_gsheet_data("AI新聞資料庫")
     
     if df_r.empty: 
         st.info("💡 目前資料庫中尚未有任何填報紀錄可供下載。")
@@ -530,7 +446,7 @@ with tab_download:
                 v_q_id = view_item.split(" - ")[0]
                 
                 with st.spinner("⏳ 正在拉取資料與雲端圖片，請稍候..."):
-                    v_q_title, v_desc_text, info_strings, combined_reqs, combined_texts, unit_enriched_files, news_data = extract_single_question_data(v_q_id, df_q, df_r, df_news)
+                    v_q_title, v_desc_text, info_strings, combined_reqs, combined_texts, unit_enriched_files = extract_single_question_data(v_q_id, df_q, df_r)
                 
                 st.markdown("---")
                 for info in info_strings:
@@ -557,23 +473,10 @@ with tab_download:
                 if unit_html_table: st.markdown(unit_html_table, unsafe_allow_html=True)
                 else: st.info("此紀錄無上傳任何單位附件。")
                 
-                if news_data:
-                    st.markdown("<div class='morandi-dark-title'>📰 相關新聞亮點與佐證</div>", unsafe_allow_html=True)
-                    for idx, news in enumerate(news_data):
-                        st.markdown(f"<div style='font-size: 1.2em; font-weight: bold; color: #154360; margin-top:15px;'>【新聞 {idx+1}】 {news['title']}</div>", unsafe_allow_html=True)
-                        st.markdown(f"**亮點摘要：** {news['summary']}")
-                        if news['link'] and news['link'] != 'nan':
-                            st.markdown(f"**新聞連結：** [{news['link']}]({news['link']})")
-                        
-                        if news['enriched_files']:
-                            news_html_table = generate_html_image_table({f"【新聞 {idx+1} 圖片】": news['enriched_files']})
-                            st.markdown(news_html_table, unsafe_allow_html=True)
-                        st.markdown("<hr style='margin: 10px 0; border-top: 1px dashed #BDC3C7;'>", unsafe_allow_html=True)
-                
                 st.markdown("<div style='text-align: center; margin-top: 30px; margin-bottom: 10px;'><b>準備好彙整這份報告了嗎？</b></div>", unsafe_allow_html=True)
                 
                 with st.spinner("⏳ 正在為您產生 Word 報告檔案..."):
-                    docx_bytes = build_word_document(v_q_id, v_q_title, info_strings, v_desc_text, combined_reqs, combined_texts, unit_enriched_files, news_data)
+                    docx_bytes = build_word_document(v_q_id, v_q_title, info_strings, v_desc_text, combined_reqs, combined_texts, unit_enriched_files)
                 
                 col_dl1, col_dl2, col_dl3 = st.columns([3, 4, 3])
                 with col_dl2:
@@ -587,7 +490,7 @@ with tab_download:
                     
         elif dl_mode == "全部題目彙整下載":
             st.markdown("<div class='morandi-select-title'>📦 批量打包下載所有題目報告</div>", unsafe_allow_html=True)
-            st.info("💡 此功能將自動為「所有已填報之題目」分別產生獨立的 Word 報告（含對應新聞與照片佐證），並打包成一個 ZIP 壓縮檔，方便您一次性下載留存。")
+            st.info("💡 此功能將自動為「所有已填報之題目」分別產生獨立的 Word 報告（含對應照片佐證），並打包成一個 ZIP 壓縮檔，方便您一次性下載留存。")
             
             if st.button("🚀 一鍵打包產生 ZIP 壓縮檔", type="primary"):
                 with st.spinner("⏳ 正在背景逐題解析資料、抓取圖片並產生 Word 報告，這需要幾分鐘的時間，請耐心等候..."):
@@ -600,8 +503,8 @@ with tab_download:
                         for i, qid in enumerate(reported_q_ids):
                             status_text.text(f"正在處理第 {i+1}/{total_q} 題：{qid} ...")
                             
-                            v_q_title, v_desc_text, info_strings, combined_reqs, combined_texts, unit_enriched_files, news_data = extract_single_question_data(qid, df_q, df_r, df_news)
-                            docx_bytes = build_word_document(qid, v_q_title, info_strings, v_desc_text, combined_reqs, combined_texts, unit_enriched_files, news_data)
+                            v_q_title, v_desc_text, info_strings, combined_reqs, combined_texts, unit_enriched_files = extract_single_question_data(qid, df_q, df_r)
+                            docx_bytes = build_word_document(qid, v_q_title, info_strings, v_desc_text, combined_reqs, combined_texts, unit_enriched_files)
                             
                             safe_title = re.sub(r'[\\/*?:"<>|]', "", v_q_title) 
                             file_name = f"{qid}_{safe_title}_填報彙整.docx"
