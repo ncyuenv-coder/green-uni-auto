@@ -111,10 +111,22 @@ def get_file_info(file_id, desc=""):
             status, done = downloader.next_chunk()
         fh.seek(0)
         file_bytes = fh.read()
+        
+        # 判斷照片比例：長式、橫式、橫幅(超寬)
+        is_landscape = True
+        is_panorama = False
+        if is_image:
+            try:
+                img = Image.open(io.BytesIO(file_bytes))
+                ratio = img.width / img.height
+                if ratio < 1.0: is_landscape = False
+                if ratio >= 1.9: is_panorama = True 
+            except Exception: pass
             
         b64_str = base64.b64encode(file_bytes).decode('utf-8') if is_image else ""
         return {
             'id': file_id, 'desc': desc, 'is_pdf': is_pdf, 'is_image': is_image, 
+            'is_landscape': is_landscape, 'is_panorama': is_panorama, 
             'b64': b64_str, 'mime_type': mime_type
         }
     except Exception: 
@@ -144,7 +156,7 @@ def format_report_text_to_html(text):
     return html.replace('\n', ' ')
 
 def generate_html_image_table(enriched_files_dict):
-    """UI 呈現：4張照片並列顯示，下方放照片說明文字"""
+    """UI 呈現：4張照片為1列，超寬照片跨2欄，下方維持放置照片說明文字"""
     has_image = any(f.get('is_image') for files in enriched_files_dict.values() for f in files)
     if not has_image: return ""
     
@@ -156,26 +168,37 @@ def generate_html_image_table(enriched_files_dict):
         if len(enriched_files_dict) > 1:
             table_html += f"<tr><td colspan='4' style='border:1px solid #D9E0E3; padding:10px; text-align:center; background-color:#E6F0F9;'><strong style='font-size:1.2em; color:#154360;'>{section_title}</strong></td></tr>"
         
-        # 每 4 張照片為一列
-        for i in range(0, len(images), 4):
-            chunk = images[i:i+4]
-            table_html += "<tr>"
+        table_html += "<tr>"
+        slots_filled = 0
+        
+        for f in images:
+            # 判斷該照片需佔據的欄位數
+            slots_needed = 2 if f.get('is_panorama') else 1
             
-            for f in chunk:
-                # 🔥 修正：改用單行字串，避免 Markdown 解析器把空白縮排誤認為 Code Block 程式碼區塊
-                table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:top; width:25%;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='width:100%; height:200px; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
+            # 如果目前列放不下，就補滿剩下的空格，並開啟新的一列
+            if slots_filled + slots_needed > 4:
+                for _ in range(4 - slots_filled):
+                    table_html += "<td style='border:1px solid #D9E0E3; width:25%;'></td>"
+                table_html += "</tr><tr>"
+                slots_filled = 0
             
-            # 填補剩下的空格維持表格結構
-            for _ in range(4 - len(chunk)):
+            width_pct = 50 if slots_needed == 2 else 25
+            img_height = "auto" if slots_needed == 2 else "200px"
+            table_html += f"<td colspan='{slots_needed}' style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:top; width:{width_pct}%;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='width:100%; height:{img_height}; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
+            
+            slots_filled += slots_needed
+
+        # 迴圈結束後，補滿最後一列的剩餘空格
+        if 0 < slots_filled < 4:
+            for _ in range(4 - slots_filled):
                 table_html += "<td style='border:1px solid #D9E0E3; width:25%;'></td>"
-                
             table_html += "</tr>"
             
     table_html += "</table>"
     return table_html
 
 def add_images_to_word_table(doc, enriched_files_dict):
-    """Word 產製：改為照片一列、照片說明文字緊接一列 (2欄並排)"""
+    """Word 產製：照片與文字分離成2列，超寬照片跨欄置中，嚴格控制長寬尺寸"""
     has_image = any(f.get('is_image') for files in enriched_files_dict.values() for f in files)
     if not has_image: return
     
@@ -195,37 +218,87 @@ def add_images_to_word_table(doc, enriched_files_dict):
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.add_run(section_title).bold = True
         
-        # 兩張照片一列，對應的說明在緊接的下一列
-        for i in range(0, len(images), 2):
-            chunk = images[i:i+2]
+        current_row_items = []
+        slots_filled = 0
+        
+        def flush_word_row():
+            nonlocal current_row_items, slots_filled
+            if not current_row_items: return
             
             row_img = table.add_row()
             row_desc = table.add_row()
             
-            for j in range(2):
-                cell_img = row_img.cells[j]
-                cell_img.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                cell_desc = row_desc.cells[j]
-                cell_desc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            # 情況 1: 該列只有 1 張全寬(橫幅)照片
+            if len(current_row_items) == 1 and current_row_items[0][1] == 2:
+                f = current_row_items[0][0]
+                cell_img = row_img.cells[0]
+                cell_img.merge(row_img.cells[1])
+                cell_desc = row_desc.cells[0]
+                cell_desc.merge(row_desc.cells[1])
                 
-                if j < len(chunk):
-                    f = chunk[j]
-                    # 插入圖片列
-                    p_img = cell_img.paragraphs[0]
-                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    try:
-                        img_bytes = base64.b64decode(f['b64'])
-                        inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5))
-                        try:
-                            spPr = inline._inline.xpath('.//pic:spPr')[0]
-                            spPr.append(parse_xml('<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'))
-                        except: pass
-                    except: p_img.add_run("(圖片無法插入)")
+                # 插入跨欄置中圖片
+                cell_img.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                p_img = cell_img.paragraphs[0]
+                p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                try:
+                    img_bytes = base64.b64decode(f['b64'])
+                    inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(15.5))
+                except: p_img.add_run("(圖片無法插入)")
+                
+                # 插入跨欄文字說明
+                cell_desc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                p_desc = cell_desc.paragraphs[0]
+                p_desc.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p_desc.add_run(f"{f['desc']}")
+                
+            # 情況 2: 該列有 1~2 張一般尺寸照片
+            else:
+                for idx in range(2):
+                    cell_img = row_img.cells[idx]
+                    cell_desc = row_desc.cells[idx]
+                    cell_img.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                    cell_desc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     
-                    # 插入獨立的文字說明列
-                    p_desc = cell_desc.paragraphs[0]
-                    p_desc.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    p_desc.add_run(f"{f['desc']}")
+                    if idx < len(current_row_items):
+                        f = current_row_items[idx][0]
+                        
+                        # 插入圖片並嚴格控制尺寸
+                        p_img = cell_img.paragraphs[0]
+                        p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        try:
+                            img_bytes = base64.b64decode(f['b64'])
+                            if f.get('is_landscape'):
+                                # 橫式：高 5.5 公分，寬 7.5 公分
+                                inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5), height=Cm(5.5))
+                            else:
+                                # 長式：高 9 公分，寬 7 公分
+                                inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.0), height=Cm(9.0))
+                        except: p_img.add_run("(圖片無法插入)")
+                        
+                        # 插入獨立一格的文字說明
+                        p_desc = cell_desc.paragraphs[0]
+                        p_desc.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        p_desc.add_run(f"{f['desc']}")
+            
+            # 清空緩存
+            current_row_items.clear()
+            slots_filled = 0
+
+        # 將影像逐一打包進排版佇列
+        for f in images:
+            slots_needed = 2 if f.get('is_panorama') else 1
+            if slots_filled + slots_needed > 2:
+                flush_word_row()
+            
+            current_row_items.append((f, slots_needed))
+            slots_filled += slots_needed
+            
+            if slots_filled == 2:
+                flush_word_row()
+                
+        # 收尾尚未滿列的項目
+        if current_row_items:
+            flush_word_row()
 
 def set_run_font(run):
     run.font.name = 'Times New Roman'
