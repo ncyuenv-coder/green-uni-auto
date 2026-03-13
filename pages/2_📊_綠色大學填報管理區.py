@@ -162,12 +162,8 @@ def generate_html_image_table(enriched_files_dict):
             table_html += "<tr>"
             
             for f in chunk:
-                table_html += f"""
-                <td style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:top; width:25%;'>
-                    <img src='data:{f['mime_type']};base64,{f['b64']}' style='width:100%; height:200px; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br>
-                    <b>{f['desc']}</b>
-                </td>
-                """
+                # 🔥 修正：改用單行字串，避免 Markdown 解析器把空白縮排誤認為 Code Block 程式碼區塊
+                table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:top; width:25%;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='width:100%; height:200px; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
             
             # 填補剩下的空格維持表格結構
             for _ in range(4 - len(chunk)):
