@@ -95,7 +95,6 @@ def load_sheet(sheet_name, max_retries=3):
     for attempt in range(max_retries):
         try:
             ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet(sheet_name)
-            # 🔥 修正：改用 get_all_values() 將所有資料當作「純文字字串」讀取，避免 6.20 被系統擅自閹割成 6.2
             all_data = ws.get_all_values()
             if not all_data or len(all_data) < 2:
                 return pd.DataFrame(columns=[str(x).strip() for x in (all_data[0] if all_data else [])])
@@ -225,11 +224,25 @@ def drive_id_to_bytes(file_id, max_retries=3):
     return None
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def get_drive_image_b64(file_id):
+def get_drive_image_info(file_id):
     fh = drive_id_to_bytes(file_id)
-    if fh:
-        return base64.b64encode(fh.read()).decode('utf-8')
-    return ""
+    if not fh: return None
+    
+    file_bytes = fh.read()
+    is_landscape = True
+    is_panorama = False
+    try:
+        img = Image.open(io.BytesIO(file_bytes))
+        ratio = img.width / img.height
+        if ratio < 1.0: is_landscape = False
+        if ratio >= 1.9: is_panorama = True 
+    except Exception: pass
+    
+    return {
+        'b64': base64.b64encode(file_bytes).decode('utf-8'),
+        'is_landscape': is_landscape,
+        'is_panorama': is_panorama
+    }
 
 # ==========================================
 # 🕸️ 爬蟲引擎與圖片雙重瘦身上傳模組 
@@ -423,6 +436,7 @@ def get_news_content(url, max_retries=3):
 # 🧠 Gemini AI 摘要引擎 
 # ==========================================
 def process_news_with_ai(news_item, q_title):
+    # 🔥 修正：強力規範多個 SDGs 細項指標輸出，並提供多項輸出範例供 AI 參考
     prompt = f"""
     你現在是大學永續發展(SDGs)評比專家。
     這篇新聞已經被確認可能符合評比題目『{q_title}』。請根據以下【新聞內容】進行濃縮與分析。
@@ -432,8 +446,13 @@ def process_news_with_ai(news_item, q_title):
     任務要求：
     1. 將新聞摘要濃縮為 150~250 字，重點放在與「{q_title}」相關的具體行動或成效。
     2. 濃縮內容若有列點，請使用「1. 」「2. 」的格式。
-    3. 獨立於摘要之外，請在最下方獨立一行，明確標註這篇新聞所對應的「所有」SDGs 指標。若符合多項指標請務必全部列出 (格式範例：【對應SDGs】：SDG 4 優質教育、SDG 11 永續城鄉與社區、SDG 13 氣候行動)。
-    4. 摘要內容請直接開始，絕對不要在開頭重複寫出「新聞標題」。
+    3. 內容排版請使用純文字，【絕對不要】使用 Markdown 的粗體符號（例如：不要寫成 **專業人才培育**，請直接寫 專業人才培育）。
+    4. 獨立於摘要之外，請在最下方獨立段落，明確標註這篇新聞所對應的「所有」SDGs 細項指標。若新聞內容有對應多個，請【務必全部列上】，不限於一個。請參照聯合國永續發展指標網站 (globalgoals.tw) 的標準，給出精準的「細項指標代碼」與「中英文完整說明」。
+       格式範例：
+       【對應SDGs】：
+       SDG 8.8：Protect labour rights and promote safe and secure working environments for all workers, including migrant workers, in particular women migrants, and those in precarious employment.(保護勞工權利和促進安全的工作環境)
+       SDG 11.4：Strengthen efforts to protect and safeguard the world’s cultural and natural heritage.(進一步努力保護和捍衛世界文化與自然遺產)
+    5. 摘要內容請直接開始，絕對不要在開頭重複寫出「新聞標題」。
     """
     try:
         response = ai_model.generate_content(prompt)
@@ -453,6 +472,8 @@ def format_report_text_to_html(text):
     html = ""
     for line in text.split('\n'):
         line = line.strip()
+        # 清除任何可能殘留的 ** 符號
+        line = line.replace('**', '') 
         if not line: html += "<div style='height: 10px;'></div>"; continue
         match = re.match(r'^([0-9a-zA-Z]+[\.、\)]|[\(（][0-9a-zA-Z一二三四五六七八九十]+[\)）]|[一二三四五六七八九十]+、|[-•*])\s*(.*)', line)
         if match: 
@@ -468,35 +489,84 @@ def set_run_font(run):
 def generate_ai_word_report(q_id, q_title, news_records):
     doc = Document()
     doc.add_heading(f'{q_id} {q_title}', level=1)
+    
     for idx, record in enumerate(news_records):
         if idx > 0: doc.add_paragraph("="*40)
         doc.add_heading(f"新聞標題：{record['新聞標題']}", level=2)
-        p_date = doc.add_paragraph(); p_date.add_run(f"發布日期：{record['新聞日期']}").italic = True
+        p_date = doc.add_paragraph()
+        p_date.add_run(f"發布日期：{record['新聞日期']}").italic = True
         
-        file_ids = str(record['照片清單']).split(',')
-        file_ids = [fid.strip() for fid in file_ids if fid.strip()]
+        raw_file_ids = str(record['照片清單']).split(',')
+        file_ids = [fid.strip() for fid in raw_file_ids if fid.strip()]
         
         if file_ids:
-            table = doc.add_table(rows=0, cols=2); table.style = 'Table Grid'
-            for i in range(0, len(file_ids), 2):
-                row = table.add_row()
-                c1 = row.cells[0]; c1.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                p1 = c1.paragraphs[0]; p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                img_b1 = drive_id_to_bytes(file_ids[i])
-                if img_b1: 
-                    try: p1.add_run().add_picture(img_b1, width=Cm(7.5))
-                    except: p1.add_run("(圖檔格式不支援)")
-                else: p1.add_run("(圖載入失敗)")
-                
-                c2 = row.cells[1]; c2.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                p2 = c2.paragraphs[0]; p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                if i + 1 < len(file_ids):
-                    img_b2 = drive_id_to_bytes(file_ids[i+1])
-                    if img_b2: 
-                        try: p2.add_run().add_picture(img_b2, width=Cm(7.5))
-                        except: p2.add_run("(圖檔格式不支援)")
-                    else: p2.add_run("(圖載入失敗)")
+            table = doc.add_table(rows=0, cols=2)
+            table.style = 'Table Grid'
             
+            img_infos = []
+            for fid in file_ids:
+                info = get_drive_image_info(fid)
+                if info: img_infos.append(info)
+                
+            chunks = []
+            current_row = []
+            slots_filled = 0
+            
+            for info in img_infos:
+                slots_needed = 2 if info['is_panorama'] else 1
+                if slots_filled + slots_needed > 2:
+                    chunks.append((current_row.copy(), slots_filled))
+                    current_row.clear()
+                    slots_filled = 0
+                
+                current_row.append(info)
+                slots_filled += slots_needed
+                
+                if slots_filled == 2:
+                    chunks.append((current_row.copy(), slots_filled))
+                    current_row.clear()
+                    slots_filled = 0
+                    
+            if current_row:
+                chunks.append((current_row.copy(), slots_filled))
+                
+            for chunk_items, filled in chunks:
+                row = table.add_row()
+                if len(chunk_items) == 1 and chunk_items[0]['is_panorama']:
+                    info = chunk_items[0]
+                    cell = row.cells[0]
+                    cell.merge(row.cells[1])
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                    p = cell.paragraphs[0]
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    try:
+                        img_bytes = base64.b64decode(info['b64'])
+                        inline = p.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(15.5))
+                        try:
+                            spPr = inline._inline.xpath('.//pic:spPr')[0]
+                            spPr.append(parse_xml('<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'))
+                        except: pass
+                    except: p.add_run("(圖檔格式不支援)")
+                else:
+                    for j in range(2):
+                        cell = row.cells[j]
+                        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                        if j < len(chunk_items):
+                            info = chunk_items[j]
+                            p = cell.paragraphs[0]
+                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            try:
+                                img_bytes = base64.b64decode(info['b64'])
+                                if info['is_landscape']:
+                                    inline = p.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5), height=Cm(5.5))
+                                else:
+                                    inline = p.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.0), height=Cm(9.0))
+                                try:
+                                    spPr = inline._inline.xpath('.//pic:spPr')[0]
+                                    spPr.append(parse_xml('<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'))
+                                except: pass
+                            except: p.add_run("(圖檔格式不支援)")
+                            
             row_title = table.add_row()
             cell_title = row_title.cells[0]
             cell_title.merge(row_title.cells[1])
@@ -509,6 +579,7 @@ def generate_ai_word_report(q_id, q_title, news_records):
         doc.add_paragraph()
         for line in str(record['AI摘要']).replace('\r', '').split('\n'):
             line = line.strip()
+            line = line.replace('**', '')
             if not line: continue
             p = doc.add_paragraph()
             match = re.match(r'^([0-9a-zA-Z]+[\.、\)]|[\(（][0-9a-zA-Z一二三四五六七八九十]+[\)）]|[一二三四五六七八九十]+、|[-•*])\s*(.*)', line)
@@ -898,52 +969,77 @@ with tab_view:
                     raw_file_ids = str(row.get('照片清單', '')).split(',')
                     raw_file_ids = [fid.strip() for fid in raw_file_ids if fid.strip()]
                     
-                    valid_fids = []
-                    b64_dict = {}
+                    valid_infos = []
                     failed_fids = []
                     
                     if raw_file_ids:
                         for fid in raw_file_ids:
-                            b64_img = get_drive_image_b64(fid)
-                            if b64_img:
-                                valid_fids.append(fid)
-                                b64_dict[fid] = b64_img
+                            info = get_drive_image_info(fid)
+                            if info:
+                                info['id'] = fid
+                                valid_infos.append(info)
                             else:
                                 failed_fids.append(fid)
                                 
                         if failed_fids:
+                            valid_fids = [info['id'] for info in valid_infos]
                             new_photo_str = ",".join(valid_fids)
                             gc = gspread.authorize(get_gcp_credentials())
                             ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
                             update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
                             delete_drive_files(failed_fids)
                         
-                        if valid_fids:
+                        if valid_infos:
                             st.markdown("**📸 新聞照片 (點擊下方按鈕可刪除不需要的圖片)**")
-                            img_cols = st.columns(4)
-                            for i, fid in enumerate(valid_fids):
-                                with img_cols[i % 4]:
-                                    st.markdown(f"<img src='data:image/jpeg;base64,{b64_dict[fid]}' style='width:100%; height:200px; object-fit:contain; border-radius:8px; border:1px solid #ddd; margin-bottom:5px;'>", unsafe_allow_html=True)
-                                    if st.button("🗑️ 刪除此圖", key=f"del_img_{real_row_idx}_{fid}", use_container_width=True):
-                                        with st.spinner("刪除雲端圖片中..."):
-                                            delete_drive_files([fid])
-                                            new_file_ids = [f for f in valid_fids if f != fid]
-                                            new_photo_str = ",".join(new_file_ids)
-                                            gc = gspread.authorize(get_gcp_credentials())
-                                            ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
-                                            update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
-                                            st.success("✅ 照片已刪除")
-                                            st.rerun()
+                            
+                            ui_rows = []
+                            current_ui_row = []
+                            current_weight = 0
+                            
+                            for info in valid_infos:
+                                weight = 2 if info['is_panorama'] else 1
+                                if current_weight + weight > 4:
+                                    ui_rows.append(current_ui_row.copy())
+                                    current_ui_row = [info]
+                                    current_weight = weight
+                                else:
+                                    current_ui_row.append(info)
+                                    current_weight += weight
+                            if current_ui_row:
+                                ui_rows.append(current_ui_row.copy())
+                                
+                            for r_items in ui_rows:
+                                weights = [2 if item['is_panorama'] else 1 for item in r_items]
+                                total_w = sum(weights)
+                                spacers = [1] * (4 - total_w)
+                                cols = st.columns(weights + spacers)
+                                
+                                for i, info in enumerate(r_items):
+                                    with cols[i]:
+                                        fid = info['id']
+                                        img_height = "auto" if info['is_panorama'] else "200px"
+                                        st.markdown(f"<img src='data:image/jpeg;base64,{info['b64']}' style='width:100%; height:{img_height}; object-fit:contain; border-radius:8px; border:1px solid #ddd; margin-bottom:5px;'>", unsafe_allow_html=True)
+                                        if st.button("🗑️ 刪除此圖", key=f"del_img_{real_row_idx}_{fid}", use_container_width=True):
+                                            with st.spinner("刪除雲端圖片中..."):
+                                                delete_drive_files([fid])
+                                                new_file_ids = [f['id'] for f in valid_infos if f['id'] != fid]
+                                                new_photo_str = ",".join(new_file_ids)
+                                                gc = gspread.authorize(get_gcp_credentials())
+                                                ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                                                update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
+                                                st.success("✅ 照片已刪除")
+                                                st.rerun()
                     
                     st.markdown("**✨ Gemini 濃縮摘要 (含 SDGs)**")
-                    fmt_ai = format_report_text_to_html(row['AI摘要'])
+                    clean_ai_summary = str(row['AI摘要']).replace('**', '')
+                    fmt_ai = format_report_text_to_html(clean_ai_summary)
                     st.markdown(f"<div style='background-color:#E6F0F9; padding:20px; border-radius:8px; border-left:5px solid #8FAAB8; color:#154360; font-size:1.1em; line-height: 1.6;'>{fmt_ai}</div>", unsafe_allow_html=True)
                     
                     st.markdown("<hr style='border:1px dashed #ccc; margin-top:20px; margin-bottom:20px;'>", unsafe_allow_html=True)
                     
                     records_to_print.append({
                         '新聞標題': row['新聞標題'], '新聞日期': row['新聞日期'],
-                        'AI摘要': row['AI摘要'], '照片清單': ",".join(valid_fids),
+                        'AI摘要': clean_ai_summary, '照片清單': ",".join([f['id'] for f in valid_infos]),
                         '新聞連結': row['新聞連結']
                     })
                     
