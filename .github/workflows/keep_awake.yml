@@ -1,0 +1,15 @@
+name: Keep Streamlit App Awake
+
+on:
+  schedule:
+    # 使用 Cron 語法，設定為每 10 小時的第 0 分鐘執行一次
+    - cron: "0 */10 * * *" 
+  workflow_dispatch: # 允許您在 GitHub 網頁上手動點擊執行
+
+jobs:
+  ping-site:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 呼叫 Streamlit 網站
+        run: |
+          curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" https://green-uni-auto-kweygzlbf2tqmytn97a3wr.streamlit.app/
