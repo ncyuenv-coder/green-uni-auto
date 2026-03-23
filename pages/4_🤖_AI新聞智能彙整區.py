@@ -29,22 +29,22 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ==========================================
 # 🌟 全域設定 & 資安防護罩
 # ==========================================
+# 修正：set_page_config 必須是第一個被呼叫的 st 指令
+st.set_page_config(page_title="嘉大 AI 新聞智能彙整", page_icon="📰", layout="wide")
+
+# 常數集中管理
+SHEET_ID = '1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8'
+NEWS_IMG_FOLDER_ID = "1VNOna4gRdtTIiFPc4XqMJU2jP01LcyXM" 
+
 if st.session_state.get("authentication_status") is not True:
     st.warning("⚠️ 請先至首頁登入系統！"); st.stop()
 
-# 🛡️ 僅限 admin_ui 檢視與管理
 if st.session_state.get("username") != "admin_ui":
     st.error("🚫 權限不足！此頁面僅限系統管理員 (admin_ui) 存取。")
     st.stop()
 
-# [精準導入 3] 狀態管理初始化，集中於此防範 KeyError
 if 'ready_zip' not in st.session_state:
     st.session_state['ready_zip'] = None
-
-st.set_page_config(page_title="嘉大 AI 新聞智能彙整", page_icon="📰", layout="wide")
-
-# 📂 新聞照片存放的 Google Drive 資料夾 ID
-NEWS_IMG_FOLDER_ID = "1VNOna4gRdtTIiFPc4XqMJU2jP01LcyXM" 
 
 # 🌟 初始化 Gemini AI 大腦
 try:
@@ -66,41 +66,30 @@ st.markdown("""
     div.stButton > button[kind="primary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.2em !important; padding: 10px 20px !important; background-color: #D4A373 !important; border: none !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     div.stButton > button[kind="secondary"] { border-radius: 8px !important; font-weight: bold !important; font-size: 1.2em !important; padding: 10px 20px !important; background-color: #8FAAB8 !important; color: white !important; border: none !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     div.stButton > button[kind="secondary"]:hover { background-color: #738A96 !important; }
-    
-    /* 🔥 下載按鈕專屬樣式：莫蘭迪深色調 */
-    [data-testid="stDownloadButton"] button { 
-        background-color: #5C6B73 !important; 
-        color: #FFFFFF !important; 
-        border: none !important; 
-        border-radius: 8px !important; 
-        font-weight: bold !important; 
-        font-size: 1.2em !important; 
-        padding: 12px 24px !important; 
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important; 
-    }
-    [data-testid="stDownloadButton"] button:hover {
-        background-color: #45545E !important;
-    }
-    
+    [data-testid="stDownloadButton"] button { background-color: #5C6B73 !important; color: #FFFFFF !important; border: none !important; border-radius: 8px !important; font-weight: bold !important; font-size: 1.2em !important; padding: 12px 24px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important; }
+    [data-testid="stDownloadButton"] button:hover { background-color: #45545E !important; }
     .raw-box { background-color: #FDF6E3; padding: 20px; border-left: 5px solid #E6C27A; border-radius: 6px; height: 500px; overflow-y: auto; line-height: 1.8; font-size: 1.1em; color: #333;}
     .action-box { background-color: #F4F6F6; padding: 20px; border-radius: 8px; border: 1px solid #D5DBDB; margin-top: 15px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🔌 資料庫連線與精準讀寫引擎
+# 🔌 資料庫連線與精準讀寫引擎 (重構集中化)
 # ==========================================
 @st.cache_resource
-def get_gcp_credentials():
+def init_google_apis():
     sk = st.secrets["gcp_oauth"].to_dict()
-    return Credentials(token=None, refresh_token=sk["refresh_token"], token_uri="https://oauth2.googleapis.com/token", client_id=sk["client_id"], client_secret=sk["client_secret"])
+    creds = Credentials(token=None, refresh_token=sk["refresh_token"], token_uri="https://oauth2.googleapis.com/token", client_id=sk["client_id"], client_secret=sk["client_secret"])
+    gc = gspread.authorize(creds)
+    drive_service = build('drive', 'v3', credentials=creds)
+    return gc, drive_service
 
-# [精準導入 2] 替載入 Google Sheet 加上快取，並搭配後續的 clear 機制確保資料同步
 @st.cache_data(ttl=600)
 def load_sheet(sheet_name, max_retries=3):
+    gc, _ = init_google_apis()
     for attempt in range(max_retries):
         try:
-            ws = gspread.authorize(get_gcp_credentials()).open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet(sheet_name)
+            ws = gc.open_by_key(SHEET_ID).worksheet(sheet_name)
             all_data = ws.get_all_values()
             if not all_data or len(all_data) < 2:
                 return pd.DataFrame(columns=[str(x).strip() for x in (all_data[0] if all_data else [])])
@@ -178,9 +167,8 @@ def update_photo_list_by_row(ws, row_idx, new_photo_str, max_retries=3):
 # ==========================================
 def delete_drive_files(file_ids, max_retries=3):
     if not file_ids: return
+    _, drive_service = init_google_apis()
     try:
-        creds = get_gcp_credentials()
-        drive_service = build('drive', 'v3', credentials=creds)
         for file_id in file_ids:
             fid = file_id.strip()
             if not fid: continue
@@ -190,14 +178,12 @@ def delete_drive_files(file_ids, max_retries=3):
                     break
                 except Exception:
                     if attempt < max_retries - 1: time.sleep(1)
-    except Exception:
-        pass 
+    except Exception: pass 
 
 def rename_drive_files(file_ids, new_q_id, news_title, max_retries=3):
     if not file_ids: return
+    _, drive_service = init_google_apis()
     try:
-        creds = get_gcp_credentials()
-        drive_service = build('drive', 'v3', credentials=creds)
         safe_title = re.sub(r'[/\\:*?"<>|]', '', news_title)[:15]
         for idx, file_id in enumerate(file_ids):
             fid = file_id.strip()
@@ -210,14 +196,12 @@ def rename_drive_files(file_ids, new_q_id, news_title, max_retries=3):
                     break
                 except Exception:
                     if attempt < max_retries - 1: time.sleep(1)
-    except Exception:
-        pass 
+    except Exception: pass 
 
 def drive_id_to_bytes(file_id, max_retries=3):
+    _, drive_service = init_google_apis()
     for attempt in range(max_retries):
         try:
-            creds = get_gcp_credentials()
-            drive_service = build('drive', 'v3', credentials=creds)
             request = drive_service.files().get_media(fileId=file_id)
             fh = io.BytesIO()
             downloader = MediaIoBaseDownload(fh, request)
@@ -633,7 +617,7 @@ def create_all_reports_zip(df_completed):
     return zip_buffer
 
 # ==========================================
-# [精準導入 1] 局部重跑：獨立為 Fragment 模組
+# 分頁模組
 # ==========================================
 @st.fragment
 def render_tab_scrape():
@@ -655,8 +639,7 @@ def render_tab_scrape():
                     row_id = str(r.get('對應題號','')).strip()
                     ids = [x.strip() for x in re.split(r'[,、/，\s]+', row_id) if x.strip()]
                     link = str(r.get('新聞連結','')).strip()
-                    for i in ids:
-                        existing_set.add(f"{i}_{link}")
+                    for i in ids: existing_set.add(f"{i}_{link}")
             
             if df_targets.empty:
                 st.error("❌ 找不到《原始新聞抓取》工作表，或表內無資料！")
@@ -668,7 +651,6 @@ def render_tab_scrape():
                     st.warning(f"在 {start_date} 至 {end_date} 區間內未抓取到任何新聞。")
                 else:
                     st.toast(f"✅ 成功獲取 {len(basic_news_list)} 篇新聞清單，準備比對...", icon="🎯")
-                    
                     matched_tasks = []
                     skipped_count = 0
                     kw_col = '搜尋關鍵字或判斷準則' if '搜尋關鍵字或判斷準則' in df_targets.columns else '關鍵字或判斷準則'
@@ -691,8 +673,7 @@ def render_tab_scrape():
                                     if check_key not in existing_set:
                                         matched_tasks.append({'q_id': q_id, 'q_title': q_title, 'news': news})
                                         existing_set.add(check_key)
-                                    else:
-                                        skipped_count += 1
+                                    else: skipped_count += 1
                                     break
                     
                     if not matched_tasks:
@@ -705,9 +686,8 @@ def render_tab_scrape():
                         progress_text = st.empty()
                         my_bar = st.progress(0)
                         
-                        drive_service = build('drive', 'v3', credentials=get_gcp_credentials())
-                        gc = gspread.authorize(get_gcp_credentials())
-                        ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                        gc, drive_service = init_google_apis()
+                        ws_ai_db = gc.open_by_key(SHEET_ID).worksheet("AI新聞資料庫")
                         
                         for i, task in enumerate(matched_tasks):
                             q_id = task['q_id']
@@ -731,13 +711,12 @@ def render_tab_scrape():
                                 '照片清單': uploaded_file_ids, '新聞連結': full_news['新聞連結']
                             }
                             
-                            if save_raw_to_db(ws_ai_db, record):
-                                success_count += 1
+                            if save_raw_to_db(ws_ai_db, record): success_count += 1
                             time.sleep(1.0) 
                                     
                         progress_text.empty()
                         my_bar.empty()
-                        load_sheet.clear() # [精準導入 2] 確保下一階段讀取最新資料
+                        load_sheet.clear()
                         st.success(f"🎉 爬蟲作業穩健完成！成功新增擷取 {success_count} 筆新聞，請前往「階段二」進行人工審核與改寫。")
 
 @st.fragment
@@ -746,11 +725,9 @@ def render_tab_ai():
     
     df_ai_db = load_sheet("AI新聞資料庫")
     df_targets = load_sheet("原始新聞抓取")
-    
     required_cols = ['對應題號', '中文標題', '新聞日期', '新聞標題', '原始內容', 'AI摘要', '照片清單', '新聞連結']
     
-    if df_ai_db.empty:
-        st.warning("目前資料庫為空，請先至「階段一」進行爬蟲抓取。")
+    if df_ai_db.empty: st.warning("目前資料庫為空，請先至「階段一」進行爬蟲抓取。")
     elif not all(col in df_ai_db.columns for col in required_cols):
         missing = [col for col in required_cols if col not in df_ai_db.columns]
         st.error(f"⚠️ 您的《AI新聞資料庫》缺少必要的欄位標題：`{', '.join(missing)}`")
@@ -760,21 +737,18 @@ def render_tab_ai():
             for _, r in df_targets.iterrows():
                 qid = str(r.get('題號', '')).strip()
                 qtitle = str(r.get('中文標題', '')).strip()
-                if qid:
-                    valid_q_list.append(f"{qid} - {qtitle}")
+                if qid: valid_q_list.append(f"{qid} - {qtitle}")
         
         df_ai_db['AI摘要'] = df_ai_db['AI摘要'].astype(str).str.strip()
         df_pending = df_ai_db[df_ai_db['AI摘要'] == ''].copy()
         
-        if df_pending.empty:
-            st.success("🎉 太棒了！資料庫中所有新聞都已經完成 AI 摘要改寫囉！")
+        if df_pending.empty: st.success("🎉 太棒了！資料庫中所有新聞都已經完成 AI 摘要改寫囉！")
         else:
             df_pending['_row_idx'] = df_pending.index + 2
             df_pending['對應題號'] = df_pending['對應題號'].astype(str).str.strip() + " - " + df_pending['中文標題'].astype(str).str.strip()
             df_pending['下拉選項'] = "【" + df_pending['對應題號'].astype(str) + "】 " + df_pending['新聞標題'].astype(str)
             
             st.markdown(f"#### 📝 尚有 <span style='color:red;'>{len(df_pending)}</span> 筆待處理新聞", unsafe_allow_html=True)
-            
             selected_news_str = st.selectbox("📌 請選擇要處理的新聞：", df_pending['下拉選項'].tolist())
             
             if selected_news_str:
@@ -802,65 +776,56 @@ def render_tab_ai():
                     st.write("確認新聞與題目相符，直接交由 Gemini 濃縮摘要。")
                     if st.button("✨ 啟提 Gemini 智慧改寫", type="primary", use_container_width=True):
                         with st.spinner("呼叫 Gemini 處理中..."):
-                            gc = gspread.authorize(get_gcp_credentials())
-                            ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                            gc, _ = init_google_apis()
+                            ws_ai_db = gc.open_by_key(SHEET_ID).worksheet("AI新聞資料庫")
                             headers = [str(h).strip() for h in ws_ai_db.get_all_values()[0]]
                             ai_col_idx = headers.index('AI摘要') + 1
                             
                             target_title = current_full_id.split(" - ", 1)[1].strip() if " - " in current_full_id else ""
-                            news_item = {'新聞標題': news_title, '原始內容': news_content}
-                            
-                            ai_summary = process_news_with_ai(news_item, target_title)
+                            ai_summary = process_news_with_ai({'新聞標題': news_title, '原始內容': news_content}, target_title)
                             
                             if "❌ 系統錯誤" in ai_summary or "⚠️" in ai_summary:
                                 st.error(f"AI 處理失敗，請稍後再試：\n{ai_summary}")
                             else:
                                 if update_ai_summary_by_row(ws_ai_db, real_row_idx, ai_col_idx, ai_summary):
                                     st.success("🎉 完成！成功生成新聞摘要並寫入資料庫！")
-                                    load_sheet.clear() # [精準導入 2]
+                                    load_sheet.clear()
                                     time.sleep(1.0)
                                     st.rerun()
-                                else:
-                                    st.error("❌ 寫入資料庫失敗，請檢查網路連線。")
+                                else: st.error("❌ 寫入資料庫失敗，請檢查網路連線。")
                                 
                     st.markdown("---")
                     st.markdown("#### 🗑️ 模式二：刪除廢棄")
                     st.write("若此新聞無參考價值，將徹底從資料庫與雲端硬碟移除。")
                     if st.button("🗑️ 徹底刪除此新聞 (含照片)", type="secondary", use_container_width=True):
                         with st.spinner("正在安全刪除照片與紀錄..."):
-                            gc = gspread.authorize(get_gcp_credentials())
-                            ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                            gc, _ = init_google_apis()
+                            ws_ai_db = gc.open_by_key(SHEET_ID).worksheet("AI新聞資料庫")
                             
                             photos_str = str(target_row.get('照片清單', ''))
                             if photos_str:
                                 fids = [f.strip() for f in photos_str.split(',') if f.strip()]
                                 if fids: delete_drive_files(fids)
                                 
-                            success_del = delete_rows_from_db(ws_ai_db, [real_row_idx])
-                            if success_del:
+                            if delete_rows_from_db(ws_ai_db, [real_row_idx]):
                                 st.success("✅ 該篇新聞與附屬的雲端照片皆已徹底刪除！")
-                                load_sheet.clear() # [精準導入 2]
+                                load_sheet.clear()
                                 time.sleep(1.5)
                                 st.rerun()
-                            else:
-                                st.error("❌ Google Sheet 資料刪除失敗，請再試一次。")
+                            else: st.error("❌ Google Sheet 資料刪除失敗，請再試一次。")
                             
                 with col_act2:
                     st.markdown("#### ✏️ 模式三：修改題號")
                     st.write("若此新聞判斷的題目不正確，請從下方選擇正確題號並儲存。")
                     
-                    try: 
-                        idx_default = valid_q_list.index(current_full_id)
-                    except ValueError: 
-                        idx_default = 0
-                        
+                    idx_default = valid_q_list.index(current_full_id) if current_full_id in valid_q_list else 0
                     new_q_selection = st.selectbox("選擇新對應題號：", valid_q_list, index=idx_default, label_visibility="collapsed")
                     
                     if st.button("💾 儲存新題號", use_container_width=True):
                         if new_q_selection != current_full_id:
                             with st.spinner("正在為您更新對應題號與照片檔名..."):
-                                gc = gspread.authorize(get_gcp_credentials())
-                                ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                                gc, _ = init_google_apis()
+                                ws_ai_db = gc.open_by_key(SHEET_ID).worksheet("AI新聞資料庫")
                                 
                                 new_id = new_q_selection.split(" - ", 1)[0].strip() if " - " in new_q_selection else new_q_selection.strip()
                                 new_title = new_q_selection.split(" - ", 1)[1].strip() if " - " in new_q_selection else ""
@@ -868,26 +833,21 @@ def render_tab_ai():
                                 photos_str = str(target_row.get('照片清單', ''))
                                 if photos_str:
                                     fids = [f.strip() for f in photos_str.split(',') if f.strip()]
-                                    if fids:
-                                        rename_drive_files(fids, new_id, news_title)
+                                    if fids: rename_drive_files(fids, new_id, news_title)
                                 
-                                updates = [{'row': real_row_idx, 'new_id': new_id, 'new_title': new_title}]
-                                if update_q_ids_in_db(ws_ai_db, updates):
+                                if update_q_ids_in_db(ws_ai_db, [{'row': real_row_idx, 'new_id': new_id, 'new_title': new_title}]):
                                     st.success("✅ 題號與雲端照片檔名修改成功！")
-                                    load_sheet.clear() # [精準導入 2]
+                                    load_sheet.clear()
                                     time.sleep(1.5)
                                     st.rerun()
-                                else:
-                                    st.error("❌ 題號修改寫入失敗。")
-                        else:
-                            st.warning("您選擇的題號與目前相同，無須修改喔！")
+                                else: st.error("❌ 題號修改寫入失敗。")
+                        else: st.warning("您選擇的題號與目前相同，無須修改喔！")
                 
                 st.markdown("</div>", unsafe_allow_html=True)
 
 @st.fragment
 def render_tab_view():
     st.markdown("<div class='morandi-dark-title'>📥 依題目檢視與打包下載</div>", unsafe_allow_html=True)
-    
     df_ai_db = load_sheet("AI新聞資料庫")
     required_cols = ['對應題號', '中文標題', '新聞日期', '新聞標題', '原始內容', 'AI摘要', '照片清單', '新聞連結']
     
@@ -897,11 +857,9 @@ def render_tab_view():
         df_ai_db['AI摘要'] = df_ai_db['AI摘要'].astype(str).str.strip()
         df_completed = df_ai_db[df_ai_db['AI摘要'] != ''].copy()
         
-        if df_completed.empty:
-            st.warning("目前尚無完成 AI 摘要的資料，請先至「階段二」執行處理。")
+        if df_completed.empty: st.warning("目前尚無完成 AI 摘要的資料，請先至「階段二」執行處理。")
         else:
             df_completed['_row_idx'] = df_completed.index + 2
-            
             reported_q_ids = df_completed['對應題號'].astype(str).str.strip().unique().tolist()
             q_options = []
             for qid in reported_q_ids:
@@ -935,16 +893,13 @@ def render_tab_view():
             if sel_q != "請選擇...":
                 v_q_id = sel_q.split(" - ")[0]
                 v_q_title = sel_q.split(" - ")[1]
-                
                 df_records = df_completed[df_completed['對應題號'].astype(str).str.strip() == v_q_id]
                 
                 st.markdown(f"<h2 style='color:#154360;'>📖 {v_q_id} {v_q_title}</h2>", unsafe_allow_html=True)
-                
                 records_to_print = []
                 
                 for idx, row in df_records.iterrows():
                     real_row_idx = row['_row_idx']
-                    
                     c_title, c_del = st.columns([8, 2])
                     with c_title:
                         st.markdown(f"#### 📰 【新聞】{row['新聞標題']}")
@@ -953,8 +908,8 @@ def render_tab_view():
                         st.markdown("<br>", unsafe_allow_html=True)
                         if st.button("🗑️ 刪除此篇新聞", key=f"del_news_tab3_{real_row_idx}", use_container_width=True):
                             with st.spinner("刪除新聞與雲端照片中..."):
-                                gc = gspread.authorize(get_gcp_credentials())
-                                ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
+                                gc, _ = init_google_apis()
+                                ws_ai_db = gc.open_by_key(SHEET_ID).worksheet("AI新聞資料庫")
                                 
                                 photos_str = str(row.get('照片清單', ''))
                                 if photos_str:
@@ -962,13 +917,12 @@ def render_tab_view():
                                     if fids: delete_drive_files(fids)
                                     
                                 delete_rows_from_db(ws_ai_db, [real_row_idx])
-                                load_sheet.clear() # [精準導入 2]
+                                load_sheet.clear()
                                 st.success("✅ 該篇新聞與附屬照片已徹底刪除！")
                                 st.rerun()
                     
                     raw_file_ids = str(row.get('照片清單', '')).split(',')
                     raw_file_ids = [fid.strip() for fid in raw_file_ids if fid.strip()]
-                    
                     valid_infos = []
                     failed_fids = []
                     
@@ -976,23 +930,19 @@ def render_tab_view():
                         for fid in raw_file_ids:
                             info = get_drive_image_info(fid)
                             if info:
-                                info['id'] = fid
-                                valid_infos.append(info)
-                            else:
-                                failed_fids.append(fid)
+                                info['id'] = fid; valid_infos.append(info)
+                            else: failed_fids.append(fid)
                                 
                         if failed_fids:
                             valid_fids = [info['id'] for info in valid_infos]
-                            new_photo_str = ",".join(valid_fids)
-                            gc = gspread.authorize(get_gcp_credentials())
-                            ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
-                            update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
+                            gc, _ = init_google_apis()
+                            ws_ai_db = gc.open_by_key(SHEET_ID).worksheet("AI新聞資料庫")
+                            update_photo_list_by_row(ws_ai_db, real_row_idx, ",".join(valid_fids))
                             delete_drive_files(failed_fids)
-                            load_sheet.clear() # [精準導入 2]
+                            load_sheet.clear()
                         
                         if valid_infos:
                             st.markdown("**📸 新聞照片 (點擊下方按鈕可刪除不需要的圖片)**")
-                            
                             ui_rows = []
                             current_ui_row = []
                             current_weight = 0
@@ -1006,14 +956,12 @@ def render_tab_view():
                                 else:
                                     current_ui_row.append(info)
                                     current_weight += weight
-                            if current_ui_row:
-                                ui_rows.append(current_ui_row.copy())
+                            if current_ui_row: ui_rows.append(current_ui_row.copy())
                                 
                             for r_items in ui_rows:
                                 weights = [2 if item['is_panorama'] else 1 for item in r_items]
                                 total_w = sum(weights)
-                                spacers = [1] * (4 - total_w)
-                                cols = st.columns(weights + spacers)
+                                cols = st.columns(weights + [1] * (4 - total_w))
                                 
                                 for i, info in enumerate(r_items):
                                     with cols[i]:
@@ -1023,12 +971,11 @@ def render_tab_view():
                                         if st.button("🗑️ 刪除此圖", key=f"del_img_{real_row_idx}_{fid}", use_container_width=True):
                                             with st.spinner("刪除雲端圖片中..."):
                                                 delete_drive_files([fid])
-                                                new_file_ids = [f['id'] for f in valid_infos if f['id'] != fid]
-                                                new_photo_str = ",".join(new_file_ids)
-                                                gc = gspread.authorize(get_gcp_credentials())
-                                                ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
-                                                update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
-                                                load_sheet.clear() # [精準導入 2]
+                                                new_fids = [f['id'] for f in valid_infos if f['id'] != fid]
+                                                gc, _ = init_google_apis()
+                                                ws_ai_db = gc.open_by_key(SHEET_ID).worksheet("AI新聞資料庫")
+                                                update_photo_list_by_row(ws_ai_db, real_row_idx, ",".join(new_fids))
+                                                load_sheet.clear()
                                                 st.success("✅ 照片已刪除")
                                                 st.rerun()
                     
@@ -1036,7 +983,6 @@ def render_tab_view():
                     clean_ai_summary = str(row['AI摘要']).replace('**', '')
                     fmt_ai = format_report_text_to_html(clean_ai_summary)
                     st.markdown(f"<div style='background-color:#E6F0F9; padding:20px; border-radius:8px; border-left:5px solid #8FAAB8; color:#154360; font-size:1.1em; line-height: 1.6;'>{fmt_ai}</div>", unsafe_allow_html=True)
-                    
                     st.markdown("<hr style='border:1px dashed #ccc; margin-top:20px; margin-bottom:20px;'>", unsafe_allow_html=True)
                     
                     records_to_print.append({
@@ -1060,14 +1006,8 @@ def render_tab_view():
 # 🚀 執行介面佈署
 # ==========================================
 st.markdown("<div class='morandi-title'>🤖 綠色大學 AI 新聞智能彙整中心</div>", unsafe_allow_html=True)
-
 tab_scrape, tab_ai, tab_view = st.tabs(["🕷️ 階段一：爬蟲抓取", "🔍 階段二：審核與 AI 改寫", "📥 階段三：檢視與下載"])
 
-with tab_scrape:
-    render_tab_scrape()
-
-with tab_ai:
-    render_tab_ai()
-
-with tab_view:
-    render_tab_view()
+with tab_scrape: render_tab_scrape()
+with tab_ai: render_tab_ai()
+with tab_view: render_tab_view()
