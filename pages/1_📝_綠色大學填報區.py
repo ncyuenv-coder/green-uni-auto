@@ -26,6 +26,14 @@ PDF_FILE_ID = "1hXs3yUwNxEiNZkJNeAfDTZjs9jxEgJos"
 DRIVE_UPLOAD_FOLDER_ID = "1C1EbqH2oL-i_uqB6aEAw6S6tEwTvpnNc"
 
 # ==========================================
+# [精準導入 3] 狀態管理初始化，集中於此
+# ==========================================
+if "upload_count" not in st.session_state: 
+    st.session_state.upload_count = 5
+if "submit_success" not in st.session_state:
+    st.session_state.submit_success = False
+
+# ==========================================
 # 🛡️ 資安防護罩 & 線上人數雷達
 # ==========================================
 if st.session_state.get("authentication_status") is not True:
@@ -149,6 +157,7 @@ st.markdown("""
 # ==========================================
 # 🔌 初始化及資料庫連線功能
 # ==========================================
+# [精準導入 2] 快取資源：確保 Google API 連線憑證不重複建立
 @st.cache_resource
 def get_gcp_credentials():
     skey = st.secrets["gcp_oauth"].to_dict()
@@ -158,7 +167,7 @@ def get_gcp_credentials():
         client_id=skey.get("client_id"), client_secret=skey.get("client_secret")
     )
 
-# 將快取時間拉長至一天 (86400秒)，減輕 API 負擔
+# [精準導入 2] 快取資料：將快取時間拉長至一天 (86400秒)，減輕 API 負擔
 @st.cache_data(ttl=86400)
 def load_gsheet_data():
     try:
@@ -172,7 +181,7 @@ def load_gsheet_data():
         return df
     except Exception as e: return pd.DataFrame()
 
-# 將快取時間拉長至一天 (86400秒)
+# [精準導入 2] 快取資料：將快取時間拉長至一天 (86400秒)
 @st.cache_data(ttl=86400)
 def load_reported_data():
     try:
@@ -221,6 +230,7 @@ def upload_file_to_drive(file_obj, filename, folder_id):
 # ==========================================
 # 🌟 智慧判斷檔案格式、照片方向與「全景圖偵測」
 # ==========================================
+# [精準導入 2] 快取資源：3600秒，避免重複下載 Drive 檔案
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_file_info(file_id, desc=""):
     try:
@@ -437,32 +447,16 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
     return out
 
 # ==========================================
-# 🚀 網頁主畫面與 UI 邏輯
+# [精準導入 1] 局部重跑：確立各 Tab 獨立為 Fragment 模組
 # ==========================================
-if "upload_count" not in st.session_state: 
-    st.session_state.upload_count = 5
-    
-col_title, col_btn = st.columns([3, 1])
-with col_title: st.title("📝 嘉大綠色大學填報系統")
-with col_btn:
-    st.write("") 
-    if st.button("🔄 同步最新雲端資料", use_container_width=True):
-        load_gsheet_data.clear()
-        load_reported_data.clear()
-        get_file_info.clear() 
-        st.rerun()
-
-tab_fill, tab_view = st.tabs(["📝 填報區", "📊 檢視填報成果"])
-
-# ==========================================
-# 🏷️ TAB 1: 填報區
-# ==========================================
-with tab_fill:
+@st.fragment
+def render_tab1_fill():
     if st.session_state.get('submit_success'):
         st.success("🎉 填報成功！資料已寫入資料庫，您可繼續填報其他項目！")
         st.session_state.submit_success = False
 
-    with st.spinner('🔄 正在載入最新評比題目...'): df_questions = load_gsheet_data()
+    with st.spinner('🔄 正在載入最新評比題目...'): 
+        df_questions = load_gsheet_data()
 
     if not df_questions.empty:
         unit_list = []
@@ -627,11 +621,11 @@ with tab_fill:
                                 load_gsheet_data.clear()
                                 st.rerun()
 
-# ==========================================
-# 🏷️ TAB 2: 檢視填報成果
-# ==========================================
-with tab_view:
+@st.fragment
+def render_tab2_view():
     df_reported = load_reported_data()
+    # 確保 Tab 2 的 Fragment 也能安全取用題目資料 (直接從快取讀取，不耗效能)
+    df_questions = load_gsheet_data()
     
     if df_reported.empty: 
         st.info("💡 目前資料庫中尚未有任何填報紀錄。")
@@ -673,7 +667,7 @@ with tab_view:
                 v_desc_text = "無"
                 v_req_text = "無特別說明"
                 
-                if 'df_questions' in locals() and not df_questions.empty:
+                if not df_questions.empty:
                     q_match = df_questions[df_questions['當年度題目'].astype(str) == v_q_id]
                     if not q_match.empty:
                         v_desc_text = str(q_match.iloc[0].get('中文說明', '無')).replace('中文說明：', '').strip()
@@ -781,3 +775,24 @@ with tab_view:
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True
                     )
+
+# ==========================================
+# 🚀 主程式執行區
+# ==========================================
+col_title, col_btn = st.columns([3, 1])
+with col_title: st.title("📝 嘉大綠色大學填報系統")
+with col_btn:
+    st.write("") 
+    if st.button("🔄 同步最新雲端資料", use_container_width=True):
+        load_gsheet_data.clear()
+        load_reported_data.clear()
+        get_file_info.clear() 
+        st.rerun()
+
+tab_fill, tab_view = st.tabs(["📝 填報區", "📊 檢視填報成果"])
+
+with tab_fill:
+    render_tab1_fill()
+    
+with tab_view:
+    render_tab2_view()
