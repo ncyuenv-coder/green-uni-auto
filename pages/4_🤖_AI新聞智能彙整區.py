@@ -37,6 +37,10 @@ if st.session_state.get("username") != "admin_ui":
     st.error("🚫 權限不足！此頁面僅限系統管理員 (admin_ui) 存取。")
     st.stop()
 
+# [精準導入 3] 狀態管理初始化，集中於此防範 KeyError
+if 'ready_zip' not in st.session_state:
+    st.session_state['ready_zip'] = None
+
 st.set_page_config(page_title="嘉大 AI 新聞智能彙整", page_icon="📰", layout="wide")
 
 # 📂 新聞照片存放的 Google Drive 資料夾 ID
@@ -91,6 +95,8 @@ def get_gcp_credentials():
     sk = st.secrets["gcp_oauth"].to_dict()
     return Credentials(token=None, refresh_token=sk["refresh_token"], token_uri="https://oauth2.googleapis.com/token", client_id=sk["client_id"], client_secret=sk["client_secret"])
 
+# [精準導入 2] 替載入 Google Sheet 加上快取，並搭配後續的 clear 機制確保資料同步
+@st.cache_data(ttl=600)
 def load_sheet(sheet_name, max_retries=3):
     for attempt in range(max_retries):
         try:
@@ -436,7 +442,6 @@ def get_news_content(url, max_retries=3):
 # 🧠 Gemini AI 摘要引擎 
 # ==========================================
 def process_news_with_ai(news_item, q_title):
-    # 🔥 修正：強力規範多個 SDGs 細項指標輸出，並提供多項輸出範例供 AI 參考
     prompt = f"""
     你現在是大學永續發展(SDGs)評比專家。
     這篇新聞已經被確認可能符合評比題目『{q_title}』。請根據以下【新聞內容】進行濃縮與分析。
@@ -472,7 +477,6 @@ def format_report_text_to_html(text):
     html = ""
     for line in text.split('\n'):
         line = line.strip()
-        # 清除任何可能殘留的 ** 符號
         line = line.replace('**', '') 
         if not line: html += "<div style='height: 10px;'></div>"; continue
         match = re.match(r'^([0-9a-zA-Z]+[\.、\)]|[\(（][0-9a-zA-Z一二三四五六七八九十]+[\)）]|[一二三四五六七八九十]+、|[-•*])\s*(.*)', line)
@@ -629,16 +633,10 @@ def create_all_reports_zip(df_completed):
     return zip_buffer
 
 # ==========================================
-# 🚀 網頁主畫面與 UI 邏輯
+# [精準導入 1] 局部重跑：獨立為 Fragment 模組
 # ==========================================
-st.markdown("<div class='morandi-title'>🤖 綠色大學 AI 新聞智能彙整中心</div>", unsafe_allow_html=True)
-
-tab_scrape, tab_ai, tab_view = st.tabs(["🕷️ 階段一：爬蟲抓取", "🔍 階段二：審核與 AI 改寫", "📥 階段三：檢視與下載"])
-
-# ==========================================
-# 🕷️ 階段一：爬蟲抓取與入庫
-# ==========================================
-with tab_scrape:
+@st.fragment
+def render_tab_scrape():
     st.markdown("<div class='morandi-dark-title'>⚙️ 第一階段：爬取原始新聞與入庫</div>", unsafe_allow_html=True)
     c_start, c_end, c_btn = st.columns([2, 2, 2])
     with c_start: start_date = st.date_input("新聞起日", datetime.date(2024, 1, 1))
@@ -739,12 +737,11 @@ with tab_scrape:
                                     
                         progress_text.empty()
                         my_bar.empty()
+                        load_sheet.clear() # [精準導入 2] 確保下一階段讀取最新資料
                         st.success(f"🎉 爬蟲作業穩健完成！成功新增擷取 {success_count} 筆新聞，請前往「階段二」進行人工審核與改寫。")
 
-# ==========================================
-# 🔍 階段二：單一新聞獨立處理模式
-# ==========================================
-with tab_ai:
+@st.fragment
+def render_tab_ai():
     st.markdown("<div class='morandi-dark-title'>🔍 第二階段：人工審核與 AI 智慧改寫</div>", unsafe_allow_html=True)
     
     df_ai_db = load_sheet("AI新聞資料庫")
@@ -820,7 +817,8 @@ with tab_ai:
                             else:
                                 if update_ai_summary_by_row(ws_ai_db, real_row_idx, ai_col_idx, ai_summary):
                                     st.success("🎉 完成！成功生成新聞摘要並寫入資料庫！")
-                                    time.sleep(4.5)
+                                    load_sheet.clear() # [精準導入 2]
+                                    time.sleep(1.0)
                                     st.rerun()
                                 else:
                                     st.error("❌ 寫入資料庫失敗，請檢查網路連線。")
@@ -841,6 +839,7 @@ with tab_ai:
                             success_del = delete_rows_from_db(ws_ai_db, [real_row_idx])
                             if success_del:
                                 st.success("✅ 該篇新聞與附屬的雲端照片皆已徹底刪除！")
+                                load_sheet.clear() # [精準導入 2]
                                 time.sleep(1.5)
                                 st.rerun()
                             else:
@@ -875,6 +874,7 @@ with tab_ai:
                                 updates = [{'row': real_row_idx, 'new_id': new_id, 'new_title': new_title}]
                                 if update_q_ids_in_db(ws_ai_db, updates):
                                     st.success("✅ 題號與雲端照片檔名修改成功！")
+                                    load_sheet.clear() # [精準導入 2]
                                     time.sleep(1.5)
                                     st.rerun()
                                 else:
@@ -884,13 +884,12 @@ with tab_ai:
                 
                 st.markdown("</div>", unsafe_allow_html=True)
 
-# ==========================================
-# 📥 階段三：檢視與下載彙整區
-# ==========================================
-with tab_view:
+@st.fragment
+def render_tab_view():
     st.markdown("<div class='morandi-dark-title'>📥 依題目檢視與打包下載</div>", unsafe_allow_html=True)
     
     df_ai_db = load_sheet("AI新聞資料庫")
+    required_cols = ['對應題號', '中文標題', '新聞日期', '新聞標題', '原始內容', 'AI摘要', '照片清單', '新聞連結']
     
     if df_ai_db.empty or not all(col in df_ai_db.columns for col in required_cols): 
         st.info("💡 目前資料庫中尚未有紀錄或欄位不齊全。")
@@ -920,7 +919,7 @@ with tab_view:
                     st.session_state['ready_zip'] = create_all_reports_zip(df_completed)
                     st.success("✅ 打包完成！請點擊下方深色按鈕下載。")
                     
-            if 'ready_zip' in st.session_state:
+            if st.session_state.get('ready_zip'):
                 st.download_button(
                     label="📥 下載全部題目彙整 (ZIP 壓縮檔)",
                     data=st.session_state['ready_zip'],
@@ -963,6 +962,7 @@ with tab_view:
                                     if fids: delete_drive_files(fids)
                                     
                                 delete_rows_from_db(ws_ai_db, [real_row_idx])
+                                load_sheet.clear() # [精準導入 2]
                                 st.success("✅ 該篇新聞與附屬照片已徹底刪除！")
                                 st.rerun()
                     
@@ -988,6 +988,7 @@ with tab_view:
                             ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
                             update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
                             delete_drive_files(failed_fids)
+                            load_sheet.clear() # [精準導入 2]
                         
                         if valid_infos:
                             st.markdown("**📸 新聞照片 (點擊下方按鈕可刪除不需要的圖片)**")
@@ -1027,6 +1028,7 @@ with tab_view:
                                                 gc = gspread.authorize(get_gcp_credentials())
                                                 ws_ai_db = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8').worksheet("AI新聞資料庫")
                                                 update_photo_list_by_row(ws_ai_db, real_row_idx, new_photo_str)
+                                                load_sheet.clear() # [精準導入 2]
                                                 st.success("✅ 照片已刪除")
                                                 st.rerun()
                     
@@ -1053,3 +1055,19 @@ with tab_view:
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True
                 )
+
+# ==========================================
+# 🚀 執行介面佈署
+# ==========================================
+st.markdown("<div class='morandi-title'>🤖 綠色大學 AI 新聞智能彙整中心</div>", unsafe_allow_html=True)
+
+tab_scrape, tab_ai, tab_view = st.tabs(["🕷️ 階段一：爬蟲抓取", "🔍 階段二：審核與 AI 改寫", "📥 階段三：檢視與下載"])
+
+with tab_scrape:
+    render_tab_scrape()
+
+with tab_ai:
+    render_tab_ai()
+
+with tab_view:
+    render_tab_view()
