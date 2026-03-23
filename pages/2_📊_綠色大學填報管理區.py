@@ -20,6 +20,7 @@ from docx.oxml.ns import qn
 # ==========================================
 # 🌟 全域參數設定 & 資安防護罩
 # ==========================================
+# [精準導入 3] 狀態管理防護：確保驗證狀態變數存在
 if st.session_state.get("authentication_status") is not True:
     st.warning("⚠️ 請先至首頁登入系統！")
     st.stop()
@@ -71,6 +72,7 @@ st.markdown("""
 # ==========================================
 # 🔌 初始化及資料庫連線功能
 # ==========================================
+# [精準導入 2] 快取資源：確保 Google API 連線憑證不重複建立
 @st.cache_resource
 def get_gcp_credentials():
     skey = st.secrets["gcp_oauth"].to_dict()
@@ -80,7 +82,8 @@ def get_gcp_credentials():
         client_id=skey.get("client_id"), client_secret=skey.get("client_secret")
     )
 
-@st.cache_data(ttl=60)
+# [精準導入 2] 快取資料：將 ttl 延長至 86400，減輕 API 負擔，並交由 UI 按鈕主動更新
+@st.cache_data(ttl=86400)
 def load_gsheet_data(sheet_name):
     try:
         creds = get_gcp_credentials()
@@ -92,6 +95,7 @@ def load_gsheet_data(sheet_name):
     except Exception: 
         return pd.DataFrame()
 
+# [精準導入 2] 快取資料：雲端圖片資訊快取
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_file_info(file_id, desc=""):
     try:
@@ -212,29 +216,19 @@ def add_images_to_word_table(doc, enriched_files_dict):
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.add_run(section_title).bold = True
             
-        # 🔥 智慧分類：將照片依比例拆分，優先同類合併
         panoramas = [f for f in images if f.get('is_panorama')]
         landscapes = [f for f in images if f.get('is_landscape') and not f.get('is_panorama')]
         portraits = [f for f in images if not f.get('is_landscape')]
         
-        # 準備排版區塊 (Chunk)
         chunks = []
-        
-        # 1. 橫幅全寬照片 (每列 1 張，佔據 2 格)
         for p_img in panoramas:
             chunks.append(([p_img], 2))
-            
-        # 2. 橫式照片 (每列 2 張)
         for i in range(0, len(landscapes) - 1, 2):
             chunks.append((landscapes[i:i+2], 1))
         rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
-        
-        # 3. 直式照片 (每列 2 張)
         for i in range(0, len(portraits) - 1, 2):
             chunks.append((portraits[i:i+2], 1))
         rem_p = portraits[-1] if len(portraits) % 2 != 0 else None
-        
-        # 4. 處理剩下的單張照片 (若直橫各剩一張才並列，否則單獨放一列)
         if rem_l and rem_p:
             chunks.append(([rem_l, rem_p], 1))
         elif rem_l:
@@ -242,20 +236,15 @@ def add_images_to_word_table(doc, enriched_files_dict):
         elif rem_p:
             chunks.append(([rem_p], 1))
 
-        # 開始繪製 Word 表格
         for chunk_files, slots_type in chunks:
             row_img = table.add_row()
             row_desc = table.add_row()
-            
-            # 若為超寬橫幅照片
             if slots_type == 2:
                 f = chunk_files[0]
                 cell_img = row_img.cells[0]
                 cell_img.merge(row_img.cells[1])
                 cell_desc = row_desc.cells[0]
                 cell_desc.merge(row_desc.cells[1])
-                
-                # 插入圖片
                 cell_img.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 p_img = cell_img.paragraphs[0]
                 p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -263,25 +252,18 @@ def add_images_to_word_table(doc, enriched_files_dict):
                     img_bytes = base64.b64decode(f['b64'])
                     inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(15.5))
                 except: p_img.add_run("(圖片無法插入)")
-                
-                # 插入說明
                 cell_desc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 p_desc = cell_desc.paragraphs[0]
                 p_desc.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p_desc.add_run(f"{f['desc']}")
-                
-            # 若為一般橫式或直式照片
             else:
                 for j in range(2):
                     cell_img = row_img.cells[j]
                     cell_desc = row_desc.cells[j]
                     cell_img.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     cell_desc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                    
                     if j < len(chunk_files):
                         f = chunk_files[j]
-                        
-                        # 插入圖片並嚴格控制尺寸
                         p_img = cell_img.paragraphs[0]
                         p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         try:
@@ -291,8 +273,6 @@ def add_images_to_word_table(doc, enriched_files_dict):
                             else:
                                 p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.0), height=Cm(9.0))
                         except: p_img.add_run("(圖片無法插入)")
-                        
-                        # 插入說明
                         p_desc = cell_desc.paragraphs[0]
                         p_desc.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         p_desc.add_run(f"{f['desc']}")
@@ -314,8 +294,8 @@ def extract_single_question_data(v_q_id, df_q, df_r):
         df_q_records['填報時間'] = pd.to_datetime(df_q_records['填報時間'])
         df_q_records = df_q_records.sort_values('填報時間').drop_duplicates(subset=['權責單位'], keep='last')
     
-    info_strings_ui = []   # 給網頁顯示用 (有 Icon)
-    info_strings_word = [] # 給 Word 匯出用 (無 Icon)
+    info_strings_ui = []
+    info_strings_word = [] 
     combined_reqs = ""
     combined_texts = ""
     unit_files_dict = {}
@@ -327,7 +307,6 @@ def extract_single_question_data(v_q_id, df_q, df_r):
         ext = str(row.get('填報人分機', '無')).strip()
         em = str(row.get('填報人電子郵件', '無')).strip()
         
-        # 🔥 分流：區分 UI 顯示與 Word 匯出的純淨版本
         info_strings_ui.append(f"填報單位：{u}  |  👤 填報人：{rep}  |  📞 分機：{ext}  |  📧 Email：{em}")
         info_strings_word.append(f"填報單位：{u}  |  填報人：{rep}  |  分機：{ext}  |  Email：{em}")
         
@@ -421,23 +400,10 @@ def build_word_document(v_q_id, v_q_title, info_strings_word, desc_text, req_tex
     return out
 
 # ==========================================
-# 🚀 網頁主畫面與 UI 邏輯
+# [精準導入 1] 分頁模組：局部重跑 Fragment
 # ==========================================
-col_title, col_btn = st.columns([3, 1])
-with col_title: st.title("📊 嘉大綠色大學填報管理區")
-with col_btn:
-    st.write("") 
-    if st.button("🔄 同步最新雲端資料", use_container_width=True):
-        load_gsheet_data.clear()
-        get_file_info.clear() 
-        st.rerun()
-
-tab_missing, tab_download = st.tabs(["🎯 追蹤未申報單位", "📥 下載彙整資料"])
-
-# ==========================================
-# 🏷️ TAB 1: 追蹤未申報單位
-# ==========================================
-with tab_missing:
+@st.fragment
+def render_tab_missing():
     with st.spinner("⏳ 正在比對資料庫，找出未申報名單..."):
         df_req = load_gsheet_data("評比題目表")
         df_sub = load_gsheet_data("填報資料庫")
@@ -490,10 +456,8 @@ with tab_missing:
                     count += 1
                 st.markdown(html_str, unsafe_allow_html=True)
 
-# ==========================================
-# 🏷️ TAB 2: 下載彙整資料 (單題 & 批次 ZIP)
-# ==========================================
-with tab_download:
+@st.fragment
+def render_tab_download():
     df_r = load_gsheet_data("填報資料庫")
     df_q = load_gsheet_data("評比題目表")
     
@@ -598,3 +562,23 @@ with tab_download:
                         mime="application/zip",
                         use_container_width=True
                     )
+
+# ==========================================
+# 🚀 網頁主畫面與 UI 邏輯
+# ==========================================
+col_title, col_btn = st.columns([3, 1])
+with col_title: st.title("📊 嘉大綠色大學填報管理區")
+with col_btn:
+    st.write("") 
+    if st.button("🔄 同步最新雲端資料", use_container_width=True):
+        load_gsheet_data.clear()
+        get_file_info.clear() 
+        st.rerun()
+
+tab_missing, tab_download = st.tabs(["🎯 追蹤未申報單位", "📥 下載彙整資料"])
+
+with tab_missing:
+    render_tab_missing()
+
+with tab_download:
+    render_tab_download()
