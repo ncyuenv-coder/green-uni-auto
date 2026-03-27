@@ -1,13 +1,13 @@
-name: Keep Streamlit App Awake
+name: Keep Streamlit App Awake (Playwright)
 
 on:
   schedule:
-    # 建議改為每 8 小時執行一次，降低被判定休眠的機率
+    # 建議每 8 小時執行一次
     - cron: "0 */8 * * *" 
   workflow_dispatch:
 
 jobs:
-  ping-site:
+  keep-awake:
     runs-on: ubuntu-latest
     steps:
       - name: 設定 Python 環境
@@ -15,44 +15,42 @@ jobs:
         with:
           python-version: '3.10'
           
-      - name: 安裝 requests 套件
-        run: pip install requests
-        
-      - name: 執行 Python 喚醒腳本
+      - name: 安裝 Playwright 套件
+        run: |
+          pip install playwright
+          playwright install chromium
+          
+      - name: 執行 Playwright 真實瀏覽器喚醒腳本
         run: |
           python -c "
-          import requests
+          from playwright.sync_api import sync_playwright
           import time
           
           url = 'https://green-uni-auto-kweygzlbf2tqmytn97a3wr.streamlit.app/'
-          headers = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Cache-Control': 'no-cache'
-          }
           
-          # 使用 Session 來自動處理 Cookies 與重新導向迴圈
-          session = requests.Session()
-          
-          try:
-              print('正在呼叫主應用程式介面...')
-              # 加入時間戳記避免快取
-              timestamp = int(time.time())
-              response = session.get(f'{url}?t={timestamp}', headers=headers, timeout=30)
-              print(f'首頁狀態碼: {response.status_code}')
+          with sync_playwright() as p:
+              # 啟動隱形 Chrome 瀏覽器
+              browser = p.chromium.launch(headless=True)
+              page = browser.new_page()
               
-              # 稍微暫停，給予伺服器喚醒時間
-              time.sleep(5)
+              print('正在模擬真實使用者開啟網頁...')
               
-              print('正在呼叫 Streamlit 後端健康檢查端點...')
-              health_url = f'{url}_stcore/health'
-              h_res = session.get(health_url, headers=headers, timeout=30)
-              print(f'健康檢查狀態碼: {h_res.status_code}')
-              
-              # 若健康檢查狀態碼非 200，手動拋出例外讓 Actions 亮紅燈
-              if h_res.status_code != 200:
-                  print(f'警告：健康檢查回傳異常狀態碼 {h_res.status_code}')
+              try:
+                  # 前往網址，並等待網路活動靜止 (確保 JavaScript 完全載入並執行)
+                  page.goto(url, wait_until='networkidle', timeout=60000)
                   
-          except Exception as e:
-              print(f'喚醒過程發生連線錯誤: {e}')
-              exit(1)
+                  print(f'成功載入，目前網頁標題: {page.title()}')
+                  
+                  # 關鍵步驟：強制停留 15 秒
+                  # 這段時間能確保 Streamlit 的 WebSocket (/stream) 成功連線並註冊活躍狀態
+                  print('正在維持頁面開啟，等待 WebSocket 連線...')
+                  time.sleep(15)
+                  
+                  print('喚醒/保活程序順利完成！')
+                  
+              except Exception as e:
+                  print(f'載入網頁時發生錯誤: {e}')
+                  exit(1)
+              finally:
+                  browser.close()
           "
