@@ -2,14 +2,28 @@ name: Keep Streamlit App Awake
 
 on:
   schedule:
-    # 使用 Cron 語法，設定為每 10 小時的第 0 分鐘執行一次
+    # 建議：維持 10 小時可以，但若 Streamlit 縮短了休眠判定時間，可考慮改為每 8 小時 (0 */8 * * *)
     - cron: "0 */10 * * *" 
-  workflow_dispatch: # 允許您在 GitHub 網頁上手動點擊執行
+  workflow_dispatch: # 允許手動執行
 
 jobs:
   ping-site:
     runs-on: ubuntu-latest
     steps:
-      - name: 呼叫 Streamlit 網站
+      - name: 喚醒 Streamlit 網站與後端健康檢查
         run: |
-          curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" https://green-uni-auto-kweygzlbf2tqmytn97a3wr.streamlit.app/
+          # 1. 呼叫主網頁：加入模擬瀏覽器的 User-Agent、防快取標頭，以及動態時間戳記避免被 Cache 攔截
+          echo "正在呼叫主應用程式介面..."
+          curl -L -s -o /dev/null -w "首頁狀態碼: %{http_code}\n" \
+          -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+          -H "Cache-Control: no-cache" \
+          "https://green-uni-auto-kweygzlbf2tqmytn97a3wr.streamlit.app/?t=$(date +%s)"
+          
+          # 等待 5 秒鐘，讓伺服器有時間反應
+          sleep 5
+          
+          # 2. 呼叫 Streamlit 專屬後端端點：這能更精準地確認 Streamlit 引擎是否啟動
+          # 加上 -f 參數，如果伺服器回傳錯誤碼，GitHub Actions 才會真實亮紅燈報錯
+          echo "正在呼叫 Streamlit 後端健康檢查端點..."
+          curl -f -L -s -o /dev/null -w "健康檢查狀態碼: %{http_code}\n" \
+          "https://green-uni-auto-kweygzlbf2tqmytn97a3wr.streamlit.app/_stcore/health"
