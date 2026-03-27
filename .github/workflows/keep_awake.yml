@@ -2,28 +2,57 @@ name: Keep Streamlit App Awake
 
 on:
   schedule:
-    # 建議：維持 10 小時可以，但若 Streamlit 縮短了休眠判定時間，可考慮改為每 8 小時 (0 */8 * * *)
-    - cron: "0 */10 * * *" 
-  workflow_dispatch: # 允許手動執行
+    # 建議改為每 8 小時執行一次，降低被判定休眠的機率
+    - cron: "0 */8 * * *" 
+  workflow_dispatch:
 
 jobs:
   ping-site:
     runs-on: ubuntu-latest
     steps:
-      - name: 喚醒 Streamlit 網站與後端健康檢查
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: 安裝 requests 套件
+        run: pip install requests
+        
+      - name: 執行 Python 喚醒腳本
         run: |
-          # 1. 呼叫主網頁：加入模擬瀏覽器的 User-Agent、防快取標頭，以及動態時間戳記避免被 Cache 攔截
-          echo "正在呼叫主應用程式介面..."
-          curl -L -s -o /dev/null -w "首頁狀態碼: %{http_code}\n" \
-          -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-          -H "Cache-Control: no-cache" \
-          "https://green-uni-auto-kweygzlbf2tqmytn97a3wr.streamlit.app/?t=$(date +%s)"
+          python -c "
+          import requests
+          import time
           
-          # 等待 5 秒鐘，讓伺服器有時間反應
-          sleep 5
+          url = 'https://green-uni-auto-kweygzlbf2tqmytn97a3wr.streamlit.app/'
+          headers = {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Cache-Control': 'no-cache'
+          }
           
-          # 2. 呼叫 Streamlit 專屬後端端點：這能更精準地確認 Streamlit 引擎是否啟動
-          # 加上 -f 參數，如果伺服器回傳錯誤碼，GitHub Actions 才會真實亮紅燈報錯
-          echo "正在呼叫 Streamlit 後端健康檢查端點..."
-          curl -f -L -s -o /dev/null -w "健康檢查狀態碼: %{http_code}\n" \
-          "https://green-uni-auto-kweygzlbf2tqmytn97a3wr.streamlit.app/_stcore/health"
+          # 使用 Session 來自動處理 Cookies 與重新導向迴圈
+          session = requests.Session()
+          
+          try:
+              print('正在呼叫主應用程式介面...')
+              # 加入時間戳記避免快取
+              timestamp = int(time.time())
+              response = session.get(f'{url}?t={timestamp}', headers=headers, timeout=30)
+              print(f'首頁狀態碼: {response.status_code}')
+              
+              # 稍微暫停，給予伺服器喚醒時間
+              time.sleep(5)
+              
+              print('正在呼叫 Streamlit 後端健康檢查端點...')
+              health_url = f'{url}_stcore/health'
+              h_res = session.get(health_url, headers=headers, timeout=30)
+              print(f'健康檢查狀態碼: {h_res.status_code}')
+              
+              # 若健康檢查狀態碼非 200，手動拋出例外讓 Actions 亮紅燈
+              if h_res.status_code != 200:
+                  print(f'警告：健康檢查回傳異常狀態碼 {h_res.status_code}')
+                  
+          except Exception as e:
+              print(f'喚醒過程發生連線錯誤: {e}')
+              exit(1)
+          "
