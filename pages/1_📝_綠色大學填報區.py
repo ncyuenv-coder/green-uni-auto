@@ -359,6 +359,8 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
     portraits = [f for f in enriched_files if f.get('is_image') and not f.get('is_landscape')]
     other_docs = [f for f in enriched_files if not f.get('is_image')]
     
+    pairs = []
+    
     if len(panoramas) > 0 or len(landscapes) > 0 or len(portraits) > 0:
         table = doc.add_table(rows=0, cols=2)
         table.style = 'Table Grid'
@@ -386,7 +388,6 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
             p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         # 2. 處理一般配對照片
-        pairs = []
         for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
         rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
             
@@ -580,16 +581,19 @@ def render_tab1_fill():
                 st.markdown("</div>", unsafe_allow_html=True)
                 
                 if submitted:
-                    valid_files = []
-                    for i in range(st.session_state.upload_count):
-                        f_obj = st.session_state.get(f"file_{i}")
-                        if f_obj is not None:
-                            desc = st.session_state.get(f"desc_{i}", f"未命名附件{i+1}")
-                            valid_files.append({"file": f_obj, "desc": desc})
-                            
-                    if not report_text.strip() and len(valid_files) == 0: 
-                        st.error("⚠️ 請至少填寫成果說明，或上傳一份佐證檔案！")
+                    # 🌟 修改點：新增欄位必填驗證邏輯
+                    if not reporter_name.strip() or not reporter_ext.strip() or not reporter_email.strip():
+                        st.error("⚠️ 資料送出失敗：請完整填寫上方「👤 填報人基本資料」（包含姓名、分機號碼與電子郵件）！")
+                    elif not report_text.strip():
+                        st.error("⚠️ 資料送出失敗：請確實填寫「✍️ 填報資訊 / 年度執行亮點成果」！")
                     else:
+                        valid_files = []
+                        for i in range(st.session_state.upload_count):
+                            f_obj = st.session_state.get(f"file_{i}")
+                            if f_obj is not None:
+                                desc = st.session_state.get(f"desc_{i}", f"未命名附件{i+1}")
+                                valid_files.append({"file": f_obj, "desc": desc})
+                                
                         with st.spinner("⏳ 正在無損壓縮檔案並寫入資料庫..."):
                             upload_records = []
                             for i, vf in enumerate(valid_files):
