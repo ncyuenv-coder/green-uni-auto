@@ -250,7 +250,10 @@ def add_images_to_word_table(doc, enriched_files_dict):
                 p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 try:
                     img_bytes = base64.b64decode(f['b64'])
-                    inline = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(15.5))
+                    inline_pic = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(15.5))
+                    # --- 加入 OpenXML 圖片效果：柔邊 2.5 點 (31750 EMUs) ---
+                    effect_xml = '<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'
+                    inline_pic._inline.graphic.graphicData.pic.spPr.append(parse_xml(effect_xml))
                 except: p_img.add_run("(圖片無法插入)")
                 cell_desc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 p_desc = cell_desc.paragraphs[0]
@@ -269,9 +272,12 @@ def add_images_to_word_table(doc, enriched_files_dict):
                         try:
                             img_bytes = base64.b64decode(f['b64'])
                             if f.get('is_landscape'):
-                                p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5), height=Cm(5.5))
+                                inline_pic = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5), height=Cm(5.5))
                             else:
-                                p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.0), height=Cm(9.0))
+                                inline_pic = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.0), height=Cm(9.0))
+                            # --- 加入 OpenXML 圖片效果：柔邊 2.5 點 (31750 EMUs) ---
+                            effect_xml = '<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'
+                            inline_pic._inline.graphic.graphicData.pic.spPr.append(parse_xml(effect_xml))
                         except: p_img.add_run("(圖片無法插入)")
                         p_desc = cell_desc.paragraphs[0]
                         p_desc.alignment = WD_ALIGN_PARAGRAPH.CENTER
