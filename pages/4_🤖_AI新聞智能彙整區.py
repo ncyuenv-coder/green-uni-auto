@@ -667,7 +667,8 @@ def render_tab_scrape():
                     kw_col = '搜尋關鍵字或判斷準則' if '搜尋關鍵字或判斷準則' in df_targets.columns else '關鍵字或判斷準則'
                     
                     for _, target in df_targets.iterrows():
-                        q_id = str(target.get('題號', '')).strip()
+                        # [精準修正] 增加容錯：優先讀取 '對應題號'，若無則讀取 '題號'
+                        q_id = str(target.get('對應題號', target.get('題號', ''))).strip()
                         q_title = str(target.get('中文標題', '')).strip()
                         raw_kw = str(target.get(kw_col, ''))
                         if not raw_kw.strip() or raw_kw.lower() == 'nan': raw_kw = q_title
@@ -751,7 +752,8 @@ def render_tab_ai():
         valid_q_list = []
         if not df_targets.empty:
             for _, r in df_targets.iterrows():
-                qid = str(r.get('題號', '')).strip()
+                # [精準修正] 增加容錯：優先讀取 '對應題號'，若無則讀取 '題號'
+                qid = str(r.get('對應題號', r.get('題號', ''))).strip()
                 qtitle = str(r.get('中文標題', '')).strip()
                 if qid: valid_q_list.append(f"{qid} - {qtitle}")
         
