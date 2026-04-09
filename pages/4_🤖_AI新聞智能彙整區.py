@@ -94,7 +94,18 @@ def load_sheet(sheet_name, max_retries=3):
             if not all_data or len(all_data) < 2:
                 return pd.DataFrame(columns=[str(x).strip() for x in (all_data[0] if all_data else [])])
             headers = [str(x).strip() for x in all_data[0]]
-            return pd.DataFrame(all_data[1:], columns=headers)
+            
+            # 建立 DataFrame
+            df = pd.DataFrame(all_data[1:], columns=headers)
+            
+            # [穩定度優化] 1. 容錯處理：若表頭誤寫為「題號」，自動對齊為「對應題號」
+            if '題號' in df.columns and '對應題號' not in df.columns:
+                df = df.rename(columns={'題號': '對應題號'})
+            
+            # [穩定度優化] 2. 過濾幽靈空白列：移除整列都是空白的無效資料，避免後續 DataFrame 判斷異常
+            df = df.replace('', pd.NA).dropna(how='all').fillna('')
+            
+            return df
         except Exception:
             if attempt < max_retries - 1: time.sleep(2)
             else: return pd.DataFrame()
@@ -723,6 +734,11 @@ def render_tab_scrape():
 def render_tab_ai():
     st.markdown("<div class='morandi-dark-title'>🔍 第二階段：人工審核與 AI 智慧改寫</div>", unsafe_allow_html=True)
     
+    # [新增] 手動更新資料庫按鈕
+    if st.button("🔄 點我重新讀取/同步最新資料庫", key="refresh_tab2", type="secondary", use_container_width=True):
+        load_sheet.clear() # 清除舊快取
+        st.rerun()         # 重新渲染畫面以抓取新資料
+        
     df_ai_db = load_sheet("AI新聞資料庫")
     df_targets = load_sheet("原始新聞抓取")
     required_cols = ['對應題號', '中文標題', '新聞日期', '新聞標題', '原始內容', 'AI摘要', '照片清單', '新聞連結']
@@ -848,6 +864,12 @@ def render_tab_ai():
 @st.fragment
 def render_tab_view():
     st.markdown("<div class='morandi-dark-title'>📥 依題目檢視與打包下載</div>", unsafe_allow_html=True)
+    
+    # [新增] 手動更新資料庫按鈕
+    if st.button("🔄 點我重新讀取/同步最新資料庫", key="refresh_tab3", type="secondary", use_container_width=True):
+        load_sheet.clear() # 清除舊快取
+        st.rerun()         # 重新渲染畫面以抓取新資料
+        
     df_ai_db = load_sheet("AI新聞資料庫")
     required_cols = ['對應題號', '中文標題', '新聞日期', '新聞標題', '原始內容', 'AI摘要', '照片清單', '新聞連結']
     
