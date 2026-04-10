@@ -89,8 +89,16 @@ def load_gsheet_data(sheet_name):
         creds = get_gcp_credentials()
         gc = gspread.authorize(creds)
         sh = gc.open_by_key('1JNbpZoZHWZRrIzn0whcQFnCDkOZghZmMyFidLE7dxT8')
-        df = pd.DataFrame(sh.worksheet(sheet_name).get_all_records())
-        df.columns = df.columns.str.strip()
+        
+        # [精準修正] 改用 get_all_values() 強制讀取純字串，避免 7.20 變成 7.2
+        all_values = sh.worksheet(sheet_name).get_all_values()
+        
+        if not all_values or len(all_values) < 2:
+            headers = [str(x).strip() for x in (all_values[0] if all_values else [])]
+            return pd.DataFrame(columns=headers)
+        
+        headers = [str(x).strip() for x in all_values[0]]
+        df = pd.DataFrame(all_values[1:], columns=headers)
         return df
     except Exception: 
         return pd.DataFrame()
