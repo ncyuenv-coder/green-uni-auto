@@ -688,8 +688,9 @@ def render_tab_manage():
             real_row_idx = idx + 2
             q_id = str(row.get('對應題號', row.get('題號', ''))).strip()
             
-            # 🌟 終極防護：優先抓取「中文標題/名稱」，若無則「強制抓取 B 欄 (iloc[1])」
-            q_title = str(row.get('中文名稱', row.get('中文標題', row.iloc[1] if len(row) > 1 else '')))).strip()
+            # 🌟 修復 SyntaxError：採用乾淨、分層的安全防護寫法
+            fallback_title = str(row.iloc[1]).strip() if len(row) > 1 else ''
+            q_title = str(row.get('中文名稱', row.get('中文標題', fallback_title))).strip()
             if not q_title or q_title.lower() == 'nan':
                 q_title = "(未命名)"
                 
@@ -711,7 +712,6 @@ def render_tab_manage():
                 """, unsafe_allow_html=True)
                 
             with c_right:
-                # 🌟 將底色改為左側 #8FAAB8 的刷淡同色系 (#E4ECF0)
                 st.markdown(f"""
                 <div style='background-color: #E4ECF0; padding: 15px; border-radius: 10px; border: 1px solid #C4D3DD; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); min-height: 90px;'>
                     <div style='color: #4A606D; font-weight: bold; margin-bottom: 10px;'>🔑 搜尋關鍵字：</div>
@@ -756,11 +756,12 @@ def render_tab_scrape():
         st.error("❌ 題庫為空，請先至「初始階段」建立題目！")
         return
 
-    # 🌟 增強下拉選單資料抓取：強制鎖定 B 欄 (iloc[1])
+    # 🌟 增強下拉選單資料抓取：安全寫法
     target_options = []
     for _, r in df_targets.iterrows():
         q_id = str(r.get('對應題號', r.get('題號', ''))).strip()
-        q_title = str(r.get('中文名稱', r.get('中文標題', r.iloc[1] if len(r) > 1 else '')))).strip()
+        fallback_title = str(r.iloc[1]).strip() if len(r) > 1 else ''
+        q_title = str(r.get('中文名稱', r.get('中文標題', fallback_title))).strip()
         if not q_title or q_title.lower() == 'nan': q_title = "(未命名)"
         if q_id: target_options.append(f"{q_id} - {q_title}")
 
@@ -813,8 +814,9 @@ def render_tab_scrape():
                     for _, target in targets_to_scan.iterrows():
                         q_id = str(target.get('對應題號', target.get('題號', ''))).strip()
                         
-                        # 🌟 同步增強迴圈內的抓取邏輯
-                        q_title = str(target.get('中文名稱', target.get('中文標題', target.iloc[1] if len(target) > 1 else '未命名')))).strip()
+                        # 🌟 迴圈內的安全抓取寫法
+                        fallback_title2 = str(target.iloc[1]).strip() if len(target) > 1 else '未命名'
+                        q_title = str(target.get('中文名稱', target.get('中文標題', fallback_title2))).strip()
                         if not q_title or q_title.lower() == 'nan': q_title = "未命名"
                         
                         raw_kw = str(target.get(kw_col, ''))
@@ -906,7 +908,7 @@ def render_tab_scrape():
 
         st.markdown(f"#### ⚠️ 黃燈區：多題衝突需人工分流 ({len(st.session_state.yellow_zone)} 篇)")
         if not st.session_state.yellow_zone: 
-            st.info("無衝突新聞，太完美了！所有新聞已處理完畢。")
+            st.info("無衝突新聞，所有新聞已處理完畢。")
         else:
             for i, item in enumerate(st.session_state.yellow_zone):
                 st.markdown(f"""
@@ -916,7 +918,6 @@ def render_tab_scrape():
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 🌟 選單現在會帶有透過強制抓取 B 欄獲得的完美中文名稱
                 options = [f"{m['q_id']} - {m['q_title']}" for m in item['matches']]
                 st.selectbox("🎯 請為這篇新聞選擇最終歸屬：", options, key=f"yz_sel_{i}")
                 st.markdown("<hr style='margin: 15px 0; border-top: 1px dashed #D5DBDB;'>", unsafe_allow_html=True)
