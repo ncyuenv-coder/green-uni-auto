@@ -86,12 +86,12 @@ st.markdown("""
         background-color: #C39262 !important;
     }
     
-    /* 🌟 刪除此題按鈕：莫蘭迪深灰藍色 */
-    div.stButton > button:has(p:contains("刪除此題")) {
-        background-color: #5C6B73 !important; color: white !important; border: none !important; border-radius: 6px !important; font-size: 1.1em !important;
+    /* 🌟 刪除按鈕 (題目與新聞)：醒目橘紅色 */
+    div.stButton > button:has(p:contains("刪除此題")), div.stButton > button:has(p:contains("刪除此篇新聞")) {
+        background-color: #E2562B !important; color: white !important; border: none !important; border-radius: 6px !important; font-size: 1.1em !important;
     }
-    div.stButton > button:has(p:contains("刪除此題")):hover {
-        background-color: #34495E !important;
+    div.stButton > button:has(p:contains("刪除此題")):hover, div.stButton > button:has(p:contains("刪除此篇新聞")):hover {
+        background-color: #C0392B !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -514,10 +514,8 @@ def generate_ai_word_report(q_id, q_title, news_records):
     
     for idx, record in enumerate(news_records):
         if idx > 0: doc.add_paragraph("="*40)
-        doc.add_heading(f"新聞標題：{record['新聞標題']}", level=2)
-        p_date = doc.add_paragraph()
-        p_date.add_run(f"發布日期：{record['新聞日期']}").italic = True
         
+        # 1. 🌟 照片清單表格 (移至最前方)
         raw_file_ids = str(record['照片清單']).split(',')
         file_ids = [fid.strip() for fid in raw_file_ids if fid.strip()]
         
@@ -549,8 +547,7 @@ def generate_ai_word_report(q_id, q_title, news_records):
                     current_row.clear()
                     slots_filled = 0
                     
-            if current_row:
-                chunks.append((current_row.copy(), slots_filled))
+            if current_row: chunks.append((current_row.copy(), slots_filled))
                 
             for chunk_items, filled in chunks:
                 row = table.add_row()
@@ -579,26 +576,31 @@ def generate_ai_word_report(q_id, q_title, news_records):
                             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             try:
                                 img_bytes = base64.b64decode(info['b64'])
-                                if info['is_landscape']:
-                                    inline = p.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5), height=Cm(5.5))
-                                else:
-                                    inline = p.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.0), height=Cm(9.0))
+                                if info['is_landscape']: inline = p.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5), height=Cm(5.5))
+                                else: inline = p.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.0), height=Cm(9.0))
                                 try:
                                     spPr = inline._inline.xpath('.//pic:spPr')[0]
                                     spPr.append(parse_xml('<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'))
                                 except: pass
                             except: p.add_run("(圖檔格式不支援)")
-                            
-            row_title = table.add_row()
-            cell_title = row_title.cells[0]
-            cell_title.merge(row_title.cells[1])
-            cell_title.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            p_title = cell_title.paragraphs[0]
-            p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            r_title = p_title.add_run(record['新聞標題'])
-            r_title.bold = True
-                    
-        doc.add_paragraph()
+        
+        # 2. 🌟 原始新聞連結
+        p_link = doc.add_paragraph()
+        p_link.add_run("原始新聞連結：").bold = True
+        p_link.add_run(record['新聞連結'])
+        
+        # 3. 🌟 新聞標題
+        p_title = doc.add_paragraph()
+        p_title.add_run("新聞標題：").bold = True
+        p_title.add_run(record['新聞標題'])
+        
+        # 4. 🌟 發布日期
+        p_date = doc.add_paragraph()
+        p_date.add_run("發布日期：").bold = True
+        p_date.add_run(record['新聞日期'])
+
+        # 5. 🌟 AI 摘要 (移至最後方)
+        doc.add_paragraph() 
         for line in str(record['AI摘要']).replace('\r', '').split('\n'):
             line = line.strip()
             line = line.replace('**', '')
@@ -610,8 +612,7 @@ def generate_ai_word_report(q_id, q_title, news_records):
                 p.paragraph_format.left_indent = Cm(0.8); p.paragraph_format.first_line_indent = Cm(-0.8)
                 p.add_run(f"{marker} {content}")
             else: p.add_run(line)
-        p_link = doc.add_paragraph(); p_link.add_run("原始新聞連結: ").bold = True; p_link.add_run(record['新聞連結'])
-        
+
     for p in doc.paragraphs:
         if not p.style.name.startswith('Heading'): p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         for r in p.runs: set_run_font(r)
@@ -688,7 +689,6 @@ def render_tab_manage():
             real_row_idx = idx + 2
             q_id = str(row.get('對應題號', row.get('題號', ''))).strip()
             
-            # 🌟 修復 SyntaxError：採用乾淨、分層的安全防護寫法
             fallback_title = str(row.iloc[1]).strip() if len(row) > 1 else ''
             q_title = str(row.get('中文名稱', row.get('中文標題', fallback_title))).strip()
             if not q_title or q_title.lower() == 'nan':
@@ -704,16 +704,17 @@ def render_tab_manage():
             c_left, c_right = st.columns([6, 4])
             
             with c_left:
+                # 🌟 視覺輕量化：背景改為清爽淺灰藍，中文名稱字體縮小至 1.2em
                 st.markdown(f"""
-                <div style='background-color: #8FAAB8; padding: 25px; border-radius: 10px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); height: 100%; display: flex; flex-direction: column; justify-content: center;'>
-                    <div style='font-size: 2.2em; font-weight: 900; color: white; line-height: 1.1;'>{q_id}</div>
-                    <div style='font-size: 1.4em; font-weight: 600; color: #E8EEF2; margin-top: 8px;'>{q_title}</div>
+                <div style='background-color: #B3C5D1; padding: 25px; border-radius: 10px; margin-bottom: 15px; height: 100%; display: flex; flex-direction: column; justify-content: center;'>
+                    <div style='font-size: 2.2em; font-weight: 900; color: #154360; line-height: 1.1;'>{q_id}</div>
+                    <div style='font-size: 1.2em; font-weight: 700; color: #2C3E50; margin-top: 8px;'>{q_title}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
             with c_right:
                 st.markdown(f"""
-                <div style='background-color: #E4ECF0; padding: 15px; border-radius: 10px; border: 1px solid #C4D3DD; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); min-height: 90px;'>
+                <div style='background-color: #E4ECF0; padding: 15px; border-radius: 10px; border: 1px solid #C4D3DD; margin-bottom: 10px; min-height: 90px;'>
                     <div style='color: #4A606D; font-weight: bold; margin-bottom: 10px;'>🔑 搜尋關鍵字：</div>
                     {chips_html}
                 </div>
@@ -919,8 +920,18 @@ def render_tab_scrape():
                 """, unsafe_allow_html=True)
                 
                 options = [f"{m['q_id']} - {m['q_title']}" for m in item['matches']]
-                st.selectbox("🎯 請為這篇新聞選擇最終歸屬：", options, key=f"yz_sel_{i}")
-                st.markdown("<hr style='margin: 15px 0; border-top: 1px dashed #D5DBDB;'>", unsafe_allow_html=True)
+                
+                # 🌟 新增排除按鈕：透過排版將下拉選單與刪除按鈕並列
+                c_sel, c_del = st.columns([7, 3])
+                with c_sel:
+                    st.selectbox("🎯 請為這篇新聞選擇最終歸屬：", options, key=f"yz_sel_{i}")
+                with c_del:
+                    st.write("") # 垂直對齊用
+                    if st.button("🗑️ 刪除此篇新聞", key=f"del_yz_{i}", use_container_width=True):
+                        st.session_state.yellow_zone.pop(i)
+                        st.rerun() # 點擊後立刻移除該項目並刷新畫面
+                        
+                st.markdown("<hr style='margin: 10px 0 20px 0; border-top: 1px dashed #D5DBDB;'>", unsafe_allow_html=True)
 
             if st.button("🚀 動作二：確認分發並正式寫入黃燈區新聞", type="primary", use_container_width=True):
                 final_tasks = []
@@ -1006,11 +1017,19 @@ def render_tab_ai():
         if df_pending.empty: st.success("🎉 太棒了！資料庫中所有新聞都已經完成 AI 摘要改寫囉！")
         else:
             df_pending['_row_idx'] = df_pending.index + 2
-            df_pending['對應題號'] = df_pending['對應題號'].astype(str).str.strip() + " - " + df_pending['中文標題'].astype(str).str.strip()
-            df_pending['下拉選項'] = "【" + df_pending['對應題號'].astype(str) + "】 " + df_pending['新聞標題'].astype(str)
+            
+            # 🌟 確保下拉選單精準顯示為 【1.1】 新聞標題
+            df_pending['純題號'] = df_pending['對應題號'].astype(str).str.strip()
+            df_pending['下拉選項'] = "【" + df_pending['純題號'] + "】 " + df_pending['新聞標題'].astype(str).str.strip()
             
             st.markdown(f"#### 📝 尚有 <span style='color:red;'>{len(df_pending)}</span> 筆待處理新聞", unsafe_allow_html=True)
             selected_news_str = st.selectbox("📌 請選擇要處理的新聞：", df_pending['下拉選項'].tolist())
+            
+            if selected_news_str:
+                target_row = df_pending[df_pending['下拉選項'] == selected_news_str].iloc[0]
+                real_row_idx = target_row['_row_idx']
+                # 修正對應邏輯以相容後續判斷
+                current_full_id = f"{target_row['純題號']} - {str(target_row['中文標題']).strip()}"
             
             if selected_news_str:
                 target_row = df_pending[df_pending['下拉選項'] == selected_news_str].iloc[0]
