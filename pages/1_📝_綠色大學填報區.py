@@ -49,25 +49,6 @@ with st.sidebar:
     st.header(f"👤 {name}")
     st.caption(f"帳號: {username}")
     st.success("☁️ 雲端連線正常")
-    
-    # --- 線上人數統計雷達 ---
-    @st.cache_resource
-    def get_active_users(): return {}
-    
-    active_users = get_active_users()
-    if 'session_id' not in st.session_state: st.session_state['session_id'] = str(uuid.uuid4())
-    current_time = time.time()
-    active_users[st.session_state['session_id']] = current_time
-    
-    timeout_seconds = 300
-    keys_to_delete = [sid for sid, ts in active_users.items() if current_time - ts > timeout_seconds]
-    for sid in keys_to_delete: del active_users[sid]
-        
-    online_count = len(active_users)
-    st.markdown("<br>", unsafe_allow_html=True)
-    if online_count >= 20: st.error(f"🔴 目前線上人數: {online_count} 人 (擁擠，建議稍候操作)")
-    elif online_count >= 10: st.warning(f"🟡 目前線上人數: {online_count} 人 (普通，可正常填報)")
-    else: st.success(f"🟢 目前線上人數: {online_count} 人 (順暢)")
     st.markdown("---")
 
 # ==========================================
@@ -346,7 +327,8 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
     section.left_margin = Cm(1.91)
     section.right_margin = Cm(1.91)
     
-    doc.add_heading(f'嘉大綠色大學填報成果 - {unit}', 0)
+    h0 = doc.add_heading(f'嘉大綠色大學填報成果 - {unit}', 0)
+    h0.alignment = WD_ALIGN_PARAGRAPH.CENTER # 🌟 成果表頭大標題置中
     
     if reporter or ext or email:
         p_info = doc.add_paragraph(f"填報人：{reporter} | 分機：{ext} | Email：{email}")
@@ -953,8 +935,31 @@ def render_tab2_view():
 # ==========================================
 # 🚀 主程式執行區
 # ==========================================
+# 🟢 線上人數與狀態邏輯計算 (從側邊欄移入主頁面)
+@st.cache_resource
+def get_active_users(): return {}
+
+active_users = get_active_users()
+if 'session_id' not in st.session_state: st.session_state['session_id'] = str(uuid.uuid4())
+current_time = time.time()
+active_users[st.session_state['session_id']] = current_time
+
+timeout_seconds = 300
+keys_to_delete = [sid for sid, ts in active_users.items() if current_time - ts > timeout_seconds]
+for sid in keys_to_delete: del active_users[sid]
+    
+online_count = len(active_users)
+if online_count >= 20: 
+    status_html = f"🔴 目前線上人數: {online_count} 人 (擁擠，建議稍候操作)"
+elif online_count >= 10: 
+    status_html = f"🟡 目前線上人數: {online_count} 人 (普通，可正常填報)"
+else: 
+    status_html = f"🟢 目前線上人數: {online_count} 人 (順暢)"
+
 col_title, col_btn = st.columns([3, 1])
-with col_title: st.title("📝 嘉大綠色大學填報系統")
+with col_title: 
+    # 🌟 縮小主標題下邊距，讓線上人數能緊貼其後
+    st.markdown('<div style="font-size: 2.4rem; font-weight: 900; color: #2C3E50; margin-bottom: -10px;">📝 嘉大綠色大學填報系統</div>', unsafe_allow_html=True)
 with col_btn:
     st.write("") 
     if st.button("🔄 同步最新雲端資料", use_container_width=True):
@@ -962,6 +967,9 @@ with col_btn:
         load_reported_data.clear()
         get_file_info.clear() 
         st.rerun()
+
+# 🌟 顯示線上人數狀態於標題下一行，並靠右顯示
+st.markdown(f'<div style="text-align: right; margin-top: 15px; margin-bottom: 20px; font-size: 0.95rem; font-weight: 600; color: #4A4A4A;">{status_html}</div>', unsafe_allow_html=True)
 
 tab_fill, tab_view = st.tabs(["📝 填報區", "📊 檢視填報成果"])
 
