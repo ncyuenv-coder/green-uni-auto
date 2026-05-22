@@ -339,7 +339,7 @@ def set_run_font(run):
 def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, req_text, report_text, enriched_files):
     doc = Document()
     
-    # --- 🌟 設定為中等邊界 ---
+    # --- 設定為中等邊界 ---
     section = doc.sections[0]
     section.top_margin = Cm(2.54)
     section.bottom_margin = Cm(2.54)
@@ -393,7 +393,7 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
     if len(panoramas) > 0 or len(landscapes) > 0 or len(portraits) > 0:
         table = doc.add_table(rows=0, cols=2)
         table.style = 'Table Grid'
-        table.alignment = WD_TABLE_ALIGNMENT.CENTER # 🌟 表格置中
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER # 表格置中
         
         # 1. 處理全景圖
         for pano in panoramas:
@@ -451,7 +451,7 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
                     p_text = cell.add_paragraph(f"{f['desc']}")
                     p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # 🌟 處理 PDF 與其他文件
+    # 處理 PDF 與其他文件
     if len(other_docs) > 0:
         for f in other_docs:
             p1 = doc.add_paragraph()
@@ -467,7 +467,7 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
                     fh = io.BytesIO(img_bytes)
                     try:
                         if page['is_landscape']: p_img.add_run().add_picture(fh, height=Cm(10.0))
-                        else: p_img.add_run().add_picture(fh, width=Cm(16.5))
+                        else: p_img.add_run().add_picture(fh, width=Cm(15.0)) # 🌟 已精準調整為直式 15.0 公分
                     except Exception:
                         p_img.add_run("(PDF 圖片無法插入)")
             else:
@@ -476,7 +476,7 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
                 p2.add_run(f"請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
             
     if len(panoramas) == 0 and len(pairs) == 0 and len(other_docs) == 0: 
-        doc.add_paragraph("此紀錄無上傳任何附件。")
+        doc.add_paragraph("此紀錄無上傳 any 附件。")
     
     for p in doc.paragraphs:
         if not p.style.name.startswith('Heading') and p.alignment is None: p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
