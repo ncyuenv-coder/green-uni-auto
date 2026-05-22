@@ -70,10 +70,21 @@ st.markdown("""
     [data-testid="stDownloadButton"] button:hover { background-color: #45545E !important; }
     .raw-box { background-color: #FDF6E3; padding: 20px; border-left: 5px solid #E6C27A; border-radius: 6px; height: 500px; overflow-y: auto; line-height: 1.8; font-size: 1.1em; color: #333;}
     .action-box { background-color: #F4F6F6; padding: 20px; border-radius: 8px; border: 1px solid #D5DBDB; margin-top: 15px; }
-    /* 🌟 新增：階段零 視覺化卡片樣式 */
-    .topic-card { background-color: #FFFFFF; border: 1px solid #D9E0E3; border-radius: 10px; padding: 18px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    
+    /* 🌟 階段零：視覺化卡片與深灰藍色 Expander 樣式 */
+    [data-testid="stExpander"] details summary { background-color: #45545E !important; color: white !important; border-radius: 6px; }
+    [data-testid="stExpander"] details summary p { color: white !important; font-size: 1.2em !important; font-weight: bold; }
+    [data-testid="stExpander"] details summary svg { fill: white !important; }
+    
     .topic-chip { display: inline-block; background-color: #E6F0F9; color: #154360; padding: 6px 12px; border-radius: 20px; font-size: 0.95em; font-weight: bold; margin: 4px 4px 4px 0; border: 1px solid #AED6F1; }
-    .yellow-zone-box { background-color: #FFF9E6; padding: 15px; border-left: 5px solid #F1C40F; border-radius: 6px; margin-bottom: 12px; }
+    
+    /* 針對卡片內的編輯/刪除按鈕套用莫蘭迪深色 */
+    div.stButton > button:has(p:contains("修改關鍵字")), div.stButton > button:has(p:contains("刪除此題")) {
+        background-color: #5C6B73 !important; color: white !important; border: none !important; border-radius: 6px !important; font-size: 1.1em !important;
+    }
+    div.stButton > button:has(p:contains("修改關鍵字")):hover, div.stButton > button:has(p:contains("刪除此題")):hover {
+        background-color: #34495E !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -661,7 +672,7 @@ def render_tab_manage():
                     st.rerun()
                 else: st.error("⚠️ 請完整填寫所有欄位。")
 
-    st.markdown("#### 📂 視覺化題庫清單")
+    st.markdown("#### 📂 題目與搜尋關鍵字設定")
     if df_targets.empty: 
         st.info("目前無任何題目，請由上方新增。")
     else:
@@ -674,34 +685,53 @@ def render_tab_manage():
 
             if not q_id: continue
 
-            # 繪製精美卡片與 Hashtag
             chips_html = "".join([f"<span class='topic-chip'>#{k.strip()}</span>" for k in raw_kw.split(',') if k.strip()])
-            st.markdown(f"<div class='topic-card'><strong style='font-size:1.3em; color:#2C3E50;'>{q_id} {q_title}</strong><br><div style='margin-top:10px;'>{chips_html}</div></div>", unsafe_allow_html=True)
-
-            c_edit, c_del, _ = st.columns([2, 2, 6])
-            with c_edit:
-                with st.popover("✏️ 修改關鍵字"):
-                    edit_kw = st.text_input("編輯關鍵字 (逗號分隔)", value=raw_kw, key=f"edit_{real_row_idx}")
-                    if st.button("💾 儲存修改", key=f"save_{real_row_idx}"):
+            
+            # 🌟 8:2 版面分割
+            c_left, c_right = st.columns([8, 2])
+            
+            with c_left:
+                st.markdown(f"""
+                <div style='background-color: #8FAAB8; padding: 25px; border-radius: 10px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); height: 100%; display: flex; flex-direction: column; justify-content: center;'>
+                    <div style='font-size: 2.2em; font-weight: 900; color: white; line-height: 1.1;'>{q_id}</div>
+                    <div style='font-size: 1.4em; font-weight: 600; color: #E8EEF2; margin-top: 8px;'>{q_title}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+            with c_right:
+                st.markdown(f"""
+                <div style='background-color: #F4F6F7; padding: 15px; border-radius: 10px; border: 1px solid #D9E0E3; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); height: calc(100% - 60px); overflow-y: auto;'>
+                    <div style='color: #5C6B73; font-weight: bold; margin-bottom: 10px;'>🔑 搜尋關鍵字：</div>
+                    {chips_html}
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # 按鈕置於關鍵字區塊下方
+                c_b1, c_b2 = st.columns(2)
+                with c_b1:
+                    with st.popover("✏️ 修改關鍵字"):
+                        edit_kw = st.text_input("編輯關鍵字 (逗號分隔)", value=raw_kw, key=f"edit_{real_row_idx}")
+                        if st.button("💾 儲存修改", key=f"save_{real_row_idx}"):
+                            gc, _ = init_google_apis()
+                            ws = gc.open_by_key(SHEET_ID).worksheet("原始新聞抓取")
+                            headers = [str(h).strip() for h in ws.get_all_values()[0]]
+                            k_idx = headers.index(kw_col) + 1
+                            ws.update_cell(real_row_idx, k_idx, edit_kw)
+                            st.success("✅ 更新成功！")
+                            load_sheet.clear()
+                            time.sleep(1)
+                            st.rerun()
+                with c_b2:
+                    if st.button("🗑️ 刪除此題", key=f"del_{real_row_idx}"):
                         gc, _ = init_google_apis()
                         ws = gc.open_by_key(SHEET_ID).worksheet("原始新聞抓取")
-                        headers = [str(h).strip() for h in ws.get_all_values()[0]]
-                        k_idx = headers.index(kw_col) + 1
-                        ws.update_cell(real_row_idx, k_idx, edit_kw)
-                        st.success("✅ 更新成功！")
+                        delete_rows_from_db(ws, [real_row_idx])
+                        st.success("✅ 刪除成功！")
                         load_sheet.clear()
                         time.sleep(1)
                         st.rerun()
-            with c_del:
-                if st.button("🗑️ 刪除此題", key=f"del_{real_row_idx}"):
-                    gc, _ = init_google_apis()
-                    ws = gc.open_by_key(SHEET_ID).worksheet("原始新聞抓取")
-                    delete_rows_from_db(ws, [real_row_idx])
-                    st.success("✅ 刪除成功！")
-                    load_sheet.clear()
-                    time.sleep(1)
-                    st.rerun()
-            st.markdown("<hr style='margin: 10px 0; border: 0; border-top: 1px dashed #D9E0E3;'>", unsafe_allow_html=True)
+            
+            st.markdown("<hr style='margin: 5px 0 15px 0; border: 0; border-top: 2px solid #E6F0F9;'>", unsafe_allow_html=True)
 # ==========================================
 # 分頁模組
 # ==========================================
@@ -714,7 +744,6 @@ def render_tab_scrape():
         st.error("❌ 題庫為空，請先至「初始階段」建立題目！")
         return
 
-    # 1. 動態爬取範圍設定
     target_options = []
     for _, r in df_targets.iterrows():
         q_id = str(r.get('對應題號', r.get('題號', ''))).strip()
@@ -733,22 +762,19 @@ def render_tab_scrape():
     c_start, c_end = st.columns(2)
     with c_start: start_date = st.date_input("新聞起日", datetime.date(2024, 1, 1))
     with c_end: end_date = st.date_input("新聞迄日", datetime.date.today())
-    
-    st.info("💡 系統已啟用「以網址為核心」的防重複入庫機制。")
 
-    # 狀態機初始化
     if 'scan_done' not in st.session_state:
         st.session_state.scan_done = False
-        st.session_state.green_zone = []
+        st.session_state.green_zone_saved = []
         st.session_state.yellow_zone = []
         st.session_state.skipped_count = 0
 
     # ==================================
-    # 動作一：純掃描與分析衝突 (不下載檔案)
+    # 動作一：外網掃描 + 綠燈直接寫入 + 黃燈保留
     # ==================================
     if not st.session_state.scan_done:
         if st.button("🕷️ 動作一：外網掃描與分析比對", type="secondary", use_container_width=True):
-            with st.spinner("🤖 正在掃描並分析多題衝突狀況，請稍候..."):
+            with st.spinner("🤖 正在掃描並分析新聞命中狀況，請稍候..."):
                 df_existing = load_sheet("AI新聞資料庫")
                 existing_urls = set(df_existing['新聞連結'].astype(str).str.strip().tolist()) if not df_existing.empty and '新聞連結' in df_existing.columns else set()
 
@@ -770,7 +796,7 @@ def render_tab_scrape():
 
                     for _, target in targets_to_scan.iterrows():
                         q_id = str(target.get('對應題號', target.get('題號', ''))).strip()
-                        q_title = str(target.get('中文標題', '')).strip()
+                        q_title = str(target.get('中文標題', '未命名')).strip()
                         raw_kw = str(target.get(kw_col, ''))
                         if not raw_kw.strip() or raw_kw.lower() == 'nan': raw_kw = q_title
                         keywords = [k.strip() for k in re.split(r'[、,，]', raw_kw) if k.strip()]
@@ -784,70 +810,108 @@ def render_tab_scrape():
                                 clean_kw = re.sub(r'\s+', '', kw).lower()
                                 if clean_kw and clean_kw in clean_title:
                                     news_matches[url]['matches'].append({'q_id': q_id, 'q_title': q_title})
-                                    break # 中了一個關鍵字就算命中此題
+                                    break
 
-                    green_zone = []
+                    green_zone_tasks = []
                     yellow_zone = []
                     skipped_count = 0
 
                     for url, data in news_matches.items():
                         if len(data['matches']) == 0: continue
-                        if url in existing_urls: # 絕對防重複機制
+                        if url in existing_urls: 
                             skipped_count += 1
                             continue
-
-                        if len(data['matches']) == 1: green_zone.append(data)
+                        if len(data['matches']) == 1: green_zone_tasks.append(data)
                         else: yellow_zone.append(data)
 
-                    st.session_state.green_zone = green_zone
-                    st.session_state.yellow_zone = yellow_zone
-                    st.session_state.skipped_count = skipped_count
-                    st.session_state.scan_done = True
-                    st.rerun()
+                # 🌟 綠燈區直接處理入庫
+                green_saved_list = []
+                if green_zone_tasks:
+                    st.info(f"🟢 發現 {len(green_zone_tasks)} 篇單一命中新聞，正在自動為您擷取與寫入資料庫...")
+                    progress_text = st.empty()
+                    my_bar = st.progress(0)
+                    total_g = len(green_zone_tasks)
+                    
+                    gc, drive_service = init_google_apis()
+                    ws_ai_db = gc.open_by_key(SHEET_ID).worksheet("AI新聞資料庫")
+                    
+                    for i, item in enumerate(green_zone_tasks):
+                        q_id = item['matches'][0]['q_id']
+                        q_title = item['matches'][0]['q_title']
+                        news_title = item['news']['新聞標題']
+                        
+                        progress_text.markdown(f"**📥 綠燈區 ({i+1}/{total_g}) 擷取與上傳中：** {q_id} v.s. 「{news_title}」")
+                        my_bar.progress((i + 1) / total_g)
+                        
+                        detail = get_news_content(item['news']['新聞連結'])
+                        full_news = {**item['news'], **detail}
+                        
+                        uploaded_file_ids = []
+                        for img_idx, img_url in enumerate(full_news['照片清單']):
+                            clean_name_prefix = f"News_{q_id}_{re.sub(r'[/\\:*?\"<>|]', '', news_title)[:15]}_{img_idx+1}"
+                            fid = download_compress_upload_image(img_url, drive_service, clean_name_prefix)
+                            if fid: uploaded_file_ids.append(fid)
+                            
+                        record = {
+                            '題號': q_id, '中文標題': q_title, '新聞日期': full_news['新聞日期'],
+                            '新聞標題': full_news['新聞標題'], '原始內容': full_news['原始內容'],
+                            '照片清單': uploaded_file_ids, '新聞連結': full_news['新聞連結']
+                        }
+                        if save_raw_to_db(ws_ai_db, record): 
+                            green_saved_list.append(f"【{q_id}】 {news_title}")
+                        time.sleep(1.0)
+                        
+                    progress_text.empty()
+                    my_bar.empty()
+                    st.success(f"✅ {len(green_saved_list)} 篇單一命中新聞已成功自動入庫！")
+
+                st.session_state.green_zone_saved = green_saved_list
+                st.session_state.yellow_zone = yellow_zone
+                st.session_state.skipped_count = skipped_count
+                st.session_state.scan_done = True
+                st.rerun()
 
     # ==================================
-    # 動作二：人工分流後，正式抓取入庫
+    # 動作二：人工分流黃燈區
     # ==================================
     else:
-        st.success(f"✅ 掃描完畢！共過濾掉 {st.session_state.skipped_count} 篇資料庫已存在的重複新聞。")
+        st.success(f"✅ 掃描與綠燈作業完畢！共過濾掉 {st.session_state.skipped_count} 篇資料庫已存在的重複新聞。")
 
-        st.markdown(f"#### 🟢 綠燈區：單一題號精準命中 ({len(st.session_state.green_zone)} 篇)")
-        if not st.session_state.green_zone: 
+        st.markdown(f"#### 🟢 綠燈區：已自動入庫名單 ({len(st.session_state.green_zone_saved)} 篇)")
+        if not st.session_state.green_zone_saved: 
             st.info("無單一命中新聞。")
         else:
-            with st.expander("點擊檢視自動歸屬名單", expanded=False):
-                for item in st.session_state.green_zone:
-                    st.markdown(f"✔️ 【{item['matches'][0]['q_id']}】 {item['news']['新聞標題']}")
+            with st.expander("點擊檢視已成功入庫新聞", expanded=False):
+                for title in st.session_state.green_zone_saved:
+                    st.markdown(f"✔️ {title}")
 
         st.markdown(f"#### ⚠️ 黃燈區：多題衝突需人工分流 ({len(st.session_state.yellow_zone)} 篇)")
         if not st.session_state.yellow_zone: 
-            st.info("無衝突新聞，太完美了！")
+            st.info("無衝突新聞，太完美了！所有新聞已處理完畢。")
         else:
             for i, item in enumerate(st.session_state.yellow_zone):
-                st.markdown(f"<div class='yellow-zone-box'>", unsafe_allow_html=True)
-                st.markdown(f"**📰 {item['news']['新聞標題']}** <span style='color:#7F8C8D; font-size:0.9em;'>({item['news']['新聞日期']})</span>", unsafe_allow_html=True)
+                # 🌟 修復排版：文字與連結放進 div 容器，選單獨立在下方
+                st.markdown(f"""
+                <div style='background-color: #FFF9E6; padding: 15px; border-left: 5px solid #F1C40F; border-radius: 6px; margin-bottom: 5px;'>
+                    <b style='font-size: 1.1em; color: #2C3E50;'>📰 {item['news']['新聞標題']}</b><br>
+                    <span style='color:#7F8C8D; font-size:0.95em;'>📅 發布日期：{item['news']['新聞日期']} &nbsp;|&nbsp; 🔗 <a href='{item['news']['新聞連結']}' target='_blank' style='color:#2980B9; font-weight:bold;'>點擊檢視原始新聞</a></span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # 選單包含完整 中文標題
                 options = [f"{m['q_id']} - {m['q_title']}" for m in item['matches']]
                 st.selectbox("🎯 請為這篇新聞選擇最終歸屬：", options, key=f"yz_sel_{i}")
-                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("<hr style='margin: 15px 0; border-top: 1px dashed #D5DBDB;'>", unsafe_allow_html=True)
 
-        if st.button("🚀 動作二：確認分發並正式執行爬蟲入庫", type="primary", use_container_width=True):
-            final_tasks = []
-            # 加入綠燈區
-            for item in st.session_state.green_zone:
-                final_tasks.append({'q_id': item['matches'][0]['q_id'], 'q_title': item['matches'][0]['q_title'], 'news': item['news']})
-            # 加入黃燈區分發結果
-            for i, item in enumerate(st.session_state.yellow_zone):
-                chosen = st.session_state[f"yz_sel_{i}"]
-                q_id = chosen.split(" - ")[0]
-                q_title = chosen.split(" - ")[1]
-                final_tasks.append({'q_id': q_id, 'q_title': q_title, 'news': item['news']})
+            if st.button("🚀 動作二：確認分發並正式寫入黃燈區新聞", type="primary", use_container_width=True):
+                final_tasks = []
+                for i, item in enumerate(st.session_state.yellow_zone):
+                    chosen = st.session_state[f"yz_sel_{i}"]
+                    q_id = chosen.split(" - ")[0].strip()
+                    q_title = chosen.split(" - ")[1].strip() if " - " in chosen else ""
+                    final_tasks.append({'q_id': q_id, 'q_title': q_title, 'news': item['news']})
 
-            if not final_tasks:
-                st.warning("本次掃描無任何需入庫的新聞！")
-                del st.session_state['scan_done']
-                st.rerun()
-            else:
-                with st.spinner(f"正在擷取內文與無損壓縮照片，共計 {len(final_tasks)} 篇，請稍候..."):
+                with st.spinner(f"正在為您擷取與處理黃燈區 {len(final_tasks)} 篇新聞，請稍候..."):
                     success_count = 0
                     gc, drive_service = init_google_apis()
                     ws_ai_db = gc.open_by_key(SHEET_ID).worksheet("AI新聞資料庫")
@@ -884,7 +948,7 @@ def render_tab_scrape():
                     my_bar.empty()
                     load_sheet.clear()
                     del st.session_state['scan_done']
-                    st.success(f"🎉 爬蟲作業穩健完成！成功將 {success_count} 筆乾淨新聞入庫，請前往「階段二」進行改寫。")
+                    st.success(f"🎉 作業完成！成功將 {success_count} 筆分流新聞入庫，請前往「階段二」進行改寫。")
 
 @st.fragment
 def render_tab_ai():
