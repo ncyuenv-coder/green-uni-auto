@@ -13,7 +13,7 @@ from googleapiclient.http import MediaIoBaseDownload
 from docx import Document
 from docx.shared import Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_ALIGN_VERTICAL
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 
@@ -124,6 +124,27 @@ def get_file_info(file_id, desc=""):
         fh.seek(0)
         file_bytes = fh.read()
         
+        # --- 🌟 PDF 分頁截圖引擎 ---
+        pdf_pages = []
+        if is_pdf:
+            try:
+                import fitz  # 依賴 PyMuPDF
+                doc = fitz.open(stream=file_bytes, filetype="pdf")
+                for page_num in range(len(doc)):
+                    pix = doc[page_num].get_pixmap(dpi=150)
+                    img = Image.open(io.BytesIO(pix.tobytes("png")))
+                    if img.mode in ("RGBA", "P"): img = img.convert("RGB")
+                    
+                    output = io.BytesIO()
+                    img.save(output, format='JPEG', quality=85)
+                    
+                    page_landscape = img.width >= img.height
+                    b64_str = base64.b64encode(output.getvalue()).decode('utf-8')
+                    pdf_pages.append({'b64': b64_str, 'is_landscape': page_landscape})
+            except Exception as e:
+                pass 
+        # -------------------------------------
+
         is_landscape = True
         is_panorama = False
         if is_image:
@@ -138,7 +159,7 @@ def get_file_info(file_id, desc=""):
         return {
             'id': file_id, 'desc': desc, 'is_pdf': is_pdf, 'is_image': is_image, 
             'is_landscape': is_landscape, 'is_panorama': is_panorama, 
-            'b64': b64_str, 'mime_type': mime_type
+            'b64': b64_str, 'mime_type': mime_type, 'pdf_pages': pdf_pages
         }
     except Exception: 
         return None
@@ -210,6 +231,7 @@ def add_images_to_word_table(doc, enriched_files_dict):
     
     table = doc.add_table(rows=0, cols=2)
     table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER # 🌟 新增：表格置中
     
     for section_title, files in enriched_files_dict.items():
         images = [f for f in files if f.get('is_image')]
@@ -259,7 +281,6 @@ def add_images_to_word_table(doc, enriched_files_dict):
                 try:
                     img_bytes = base64.b64decode(f['b64'])
                     inline_pic = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(15.5))
-                    # --- 加入 OpenXML 圖片效果：柔邊 2.5 點 (31750 EMUs) ---
                     effect_xml = '<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'
                     inline_pic._inline.graphic.graphicData.pic.spPr.append(parse_xml(effect_xml))
                 except: p_img.add_run("(圖片無法插入)")
@@ -283,7 +304,6 @@ def add_images_to_word_table(doc, enriched_files_dict):
                                 inline_pic = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.5), height=Cm(5.5))
                             else:
                                 inline_pic = p_img.add_run().add_picture(io.BytesIO(img_bytes), width=Cm(7.0), height=Cm(9.0))
-                            # --- 加入 OpenXML 圖片效果：柔邊 2.5 點 (31750 EMUs) ---
                             effect_xml = '<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:softEdge rad="31750"/></a:effectLst>'
                             inline_pic._inline.graphic.graphicData.pic.spPr.append(parse_xml(effect_xml))
                         except: p_img.add_run("(圖片無法插入)")
@@ -353,6 +373,14 @@ def extract_single_question_data(v_q_id, df_q, df_r):
 
 def build_word_document(v_q_id, v_q_title, info_strings_word, desc_text, req_text, report_text, unit_enriched_files):
     doc = Document()
+    
+    # --- 🌟 設定為中等邊界 ---
+    section = doc.sections[0]
+    section.top_margin = Cm(2.54)
+    section.bottom_margin = Cm(2.54)
+    section.left_margin = Cm(1.91)
+    section.right_margin = Cm(1.91)
+    
     doc.add_heading(f'嘉大綠色大學填報成果彙整', 0)
     for info in info_strings_word: 
         doc.add_paragraph(info).alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -385,22 +413,43 @@ def build_word_document(v_q_id, v_q_title, info_strings_word, desc_text, req_tex
     doc.add_heading('佐證照片/檔案：', level=2)
     add_images_to_word_table(doc, unit_enriched_files)
     
+    # 🌟 修改點：處理 PDF 與其他文件
     has_any_doc = any(not f.get('is_image') for files in unit_enriched_files.values() for f in files)
     if has_any_doc:
         doc.add_heading('其他參考資料：', level=2)
         for u, files in unit_enriched_files.items():
             docs = [f for f in files if not f.get('is_image')]
             if docs:
-                if len(unit_enriched_files) > 1: doc.add_paragraph(f"{u}").runs[0].bold = True
+                if len(unit_enriched_files) > 1: 
+                    doc.add_paragraph(f"{u}").runs[0].bold = True
+                    
                 for f in docs:
-                    doc.add_paragraph().add_run(f"{f['desc']} (此為 {'PDF 檔案' if f.get('is_pdf') else '其他文件'})").bold = True
-                    doc.add_paragraph(f"請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
+                    p1 = doc.add_paragraph()
+                    p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    ftype = "PDF 檔案" if f.get('is_pdf') else "其他文件"
+                    p1.add_run(f"{f['desc']} (此為 {ftype})").bold = True
+                    
+                    if f.get('is_pdf') and f.get('pdf_pages'):
+                        for page in f['pdf_pages']:
+                            p_img = doc.add_paragraph()
+                            p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            img_bytes = base64.b64decode(page['b64'])
+                            fh = io.BytesIO(img_bytes)
+                            try:
+                                if page['is_landscape']: p_img.add_run().add_picture(fh, height=Cm(10.0))
+                                else: p_img.add_run().add_picture(fh, width=Cm(15.0))
+                            except Exception:
+                                p_img.add_run("(PDF 圖片無法插入)")
+                    else:
+                        p2 = doc.add_paragraph()
+                        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        p2.add_run(f"請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
     
     if not any(f.get('is_image') for files in unit_enriched_files.values() for f in files) and not has_any_doc:
         doc.add_paragraph("此紀錄無上傳任何單位附件。")
     
     for p in doc.paragraphs:
-        if not p.style.name.startswith('Heading'): p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        if not p.style.name.startswith('Heading') and p.alignment is None: p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         for r in p.runs: set_run_font(r)
     for table in doc.tables:
         for row in table.rows:
@@ -522,9 +571,37 @@ def render_tab_download():
                 st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
                 
                 st.markdown("<div class='morandi-dark-title'>📎 佐證照片或檔案</div>", unsafe_allow_html=True)
+                
+                # 🌟 修改點：處理 UI 上的圖片及 PDF 滿版呈現
                 unit_html_table = generate_html_image_table(unit_enriched_files)
-                if unit_html_table: st.markdown(unit_html_table, unsafe_allow_html=True)
-                else: st.info("此紀錄無上傳任何單位附件。")
+                has_image = bool(unit_html_table)
+                if has_image: 
+                    st.markdown(unit_html_table, unsafe_allow_html=True)
+                
+                has_other_docs = False
+                for u, files in unit_enriched_files.items():
+                    other_docs = [f for f in files if not f.get('is_image')]
+                    if other_docs:
+                        has_other_docs = True
+                        if len(unit_enriched_files) > 1:
+                            st.markdown(f"<div style='font-size:1.2em; color:#154360; font-weight:bold; margin-top:20px;'>{u} 其他參考資料</div>", unsafe_allow_html=True)
+                        for f in other_docs:
+                            if f.get('is_pdf') and f.get('pdf_pages'):
+                                st.markdown(f"<div style='background-color: #f1f1f1; border-radius: 8px; border: 1px solid #ccc; padding: 15px; text-align: center; margin-bottom: 20px;'><span style='font-size:1.5em;'>📄</span> <span style='font-size:1.1em; font-weight:bold;'>📌 {f['desc']} (PDF 檔案)</span></div>", unsafe_allow_html=True)
+                                for page in f['pdf_pages']:
+                                    st.image(f"data:image/jpeg;base64,{page['b64']}", use_container_width=True)
+                            else:
+                                drive_link = f"https://drive.google.com/file/d/{f['id']}/view"
+                                icon, ftype = ("📄", "PDF 檔案") if f.get('is_pdf') else ("📁", "其他文件")
+                                st.markdown(f"""
+                                <div style='background-color: #f1f1f1; border-radius: 8px; border: 1px solid #ccc; padding: 25px; text-align: center; margin-bottom: 20px;'>
+                                    <span style='font-size:1.5em;'>{icon}</span> <span style='font-size:1.1em; font-weight:bold;'>📌 {f['desc']} ({ftype})</span><br><br>
+                                    <a href='{drive_link}' target='_blank' style='background-color: #5C6B73; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold;'>🔗 點擊前往雲端檢視</a>
+                                </div>
+                                """, unsafe_allow_html=True)
+                
+                if not has_image and not has_other_docs:
+                    st.info("此紀錄無上傳任何單位附件。")
                 
                 st.markdown("<div style='text-align: center; margin-top: 30px; margin-bottom: 10px;'><b>準備好彙整這份報告了嗎？</b></div>", unsafe_allow_html=True)
                 
@@ -543,7 +620,7 @@ def render_tab_download():
                     
         elif dl_mode == "全部題目彙整下載":
             st.markdown("<div class='morandi-select-title'>📦 批量打包下載所有題目報告</div>", unsafe_allow_html=True)
-            st.info("💡 此功能將自動為「所有已填報之題目」分別產生獨立的 Word 報告（含對應照片佐證），並打包成一個 ZIP 壓縮檔，方便您一次性下載留存。")
+            st.info("💡 此功能將自動為「所有已填報之題目」分別產生獨立的 Word 報告（含對應照片與PDF佐證），並打包成一個 ZIP 壓縮檔，方便您一次性下載留存。")
             
             if st.button("🚀 一鍵打包產生 ZIP 壓縮檔", type="primary"):
                 with st.spinner("⏳ 正在背景逐題解析資料、抓取圖片並產生 Word 報告，這需要幾分鐘的時間，請耐心等候..."):
