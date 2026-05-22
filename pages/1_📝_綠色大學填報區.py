@@ -454,29 +454,38 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
     # 處理 PDF 與其他文件
     if len(other_docs) > 0:
         for f in other_docs:
-            p1 = doc.add_paragraph()
-            p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            ftype = "PDF 檔案" if f.get('is_pdf') else "其他文件"
-            p1.add_run(f"{f['desc']} (此為 {ftype})").bold = True
-            
-            if f.get('is_pdf') and f.get('pdf_pages'):
-                for page in f['pdf_pages']:
-                    p_img = doc.add_paragraph()
-                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    img_bytes = base64.b64decode(page['b64'])
-                    fh = io.BytesIO(img_bytes)
-                    try:
-                        if page['is_landscape']: p_img.add_run().add_picture(fh, height=Cm(10.0))
-                        else: p_img.add_run().add_picture(fh, width=Cm(15.0)) # 🌟 已精準調整為直式 15.0 公分
-                    except Exception:
-                        p_img.add_run("(PDF 圖片無法插入)")
+            if f.get('is_pdf'):
+                doc.add_page_break() # 🌟 PDF 檔案強制換頁獨立顯示
+                
+                p1 = doc.add_paragraph()
+                p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p1.add_run(f"{f['desc']} (此為 PDF 檔案)").bold = True
+                
+                if f.get('pdf_pages'):
+                    for page in f['pdf_pages']:
+                        p_img = doc.add_paragraph()
+                        p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        img_bytes = base64.b64decode(page['b64'])
+                        fh = io.BytesIO(img_bytes)
+                        try:
+                            if page['is_landscape']: p_img.add_run().add_picture(fh, height=Cm(10.0))
+                            else: p_img.add_run().add_picture(fh, width=Cm(15.0)) # 直式等比例調整為 15.0 公分
+                        except Exception:
+                            p_img.add_run("(PDF 圖片無法插入)")
+                else:
+                    p2 = doc.add_paragraph()
+                    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p2.add_run(f"請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
             else:
+                p1 = doc.add_paragraph()
+                p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p1.add_run(f"{f['desc']} (此為 其他文件)").bold = True
                 p2 = doc.add_paragraph()
                 p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p2.add_run(f"請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
             
     if len(panoramas) == 0 and len(pairs) == 0 and len(other_docs) == 0: 
-        doc.add_paragraph("此紀錄無上傳 any 附件。")
+        doc.add_paragraph("此紀錄無上傳任何附件。")
     
     for p in doc.paragraphs:
         if not p.style.name.startswith('Heading') and p.alignment is None: p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
