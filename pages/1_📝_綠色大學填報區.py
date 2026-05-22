@@ -250,6 +250,40 @@ def get_file_info(file_id, desc=""):
         fh.seek(0)
         file_bytes = fh.read()
         
+        # --- 🌟 新增：PDF 完整頁面轉圖引擎 ---
+        if is_pdf:
+            try:
+                import fitz  # 依賴 PyMuPDF
+                doc = fitz.open(stream=file_bytes, filetype="pdf")
+                img_list = []
+                # 遍歷 PDF 所有頁面
+                for page_num in range(len(doc)):
+                    pix = doc[page_num].get_pixmap(dpi=150)
+                    img = Image.open(io.BytesIO(pix.tobytes("png")))
+                    if img.mode in ("RGBA", "P"): img = img.convert("RGB")
+                    img_list.append(img)
+                
+                # 若有多頁，將其垂直合併為一張長圖
+                if img_list:
+                    total_height = sum(i.height for i in img_list)
+                    max_width = max(i.width for i in img_list)
+                    combined_img = Image.new('RGB', (max_width, total_height), (255, 255, 255))
+                    y_offset = 0
+                    for i in img_list:
+                        combined_img.paste(i, (0, y_offset))
+                        y_offset += i.height
+                    
+                    output = io.BytesIO()
+                    combined_img.save(output, format='JPEG', quality=85)
+                    file_bytes = output.getvalue()
+                    
+                    # 轉換成功後，系統將其視為圖片處理
+                    is_image = True
+                    mime_type = 'image/jpeg'
+            except Exception as e:
+                pass # 若轉換失敗，保留原始 PDF 處理邏輯
+        # -------------------------------------
+
         is_landscape = True
         is_panorama = False
         if is_image:
@@ -634,12 +668,6 @@ def render_tab2_view():
     if df_reported.empty: 
         st.info("💡 目前資料庫中尚未有任何填報紀錄。")
     else:
-        st.markdown("""
-        <div style='background-color: #FFF3E0; color: #E67E22; padding: 10px 15px; border-left: 5px solid #E67E22; border-radius: 5px; margin-bottom: 20px; font-weight: bold;'>
-            💡 發現填報資料有誤嗎？請直接回到「📝 填報區」重新填寫並送出，系統會自動以您「最新一次」的送出紀錄為準喔！
-        </div>
-        """, unsafe_allow_html=True)
-
         rep_units = []
         for u in df_reported['權責單位'].dropna().unique():
             if str(u).strip() != '': rep_units.append(str(u).strip())
@@ -682,103 +710,207 @@ def render_tab2_view():
                 v_reporter = latest_record.get('填報人', '無')
                 v_ext = latest_record.get('填報人分機', '無')
                 v_email = latest_record.get('填報人電子郵件', '無')
-                st.markdown(f"<div style='color: #555555; font-size: 1.15em; margin-bottom: 10px; font-weight: bold;'>👤 填報人：{v_reporter} &nbsp;|&nbsp; 📞 分機：{v_ext} &nbsp;|&nbsp; 📧 Email：{v_email}</div>", unsafe_allow_html=True)
                 
-                st.markdown(f"<div class='morandi-question-title'>📖 {v_q_id}：{v_q_title}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='color: #B85042; font-weight: bold; font-size: 1.3em; padding-left: 5px; margin-bottom: 25px;'>{v_desc_text}</div>", unsafe_allow_html=True)
+                # === 🌟 核心切換：編輯模式開關 ===
+                edit_mode = st.toggle("✏️ 開啟編輯 / 修正此筆資料", key=f"edit_toggle_{v_q_id}")
                 
-                st.markdown(f"""
-                <div class='light-brown-box'>
-                    <strong style='font-size: 1.4em; color: #B85042;'>🔍 資料需求：</strong><br>
-                    <div style='font-size: 1.2em; margin-top: 10px; padding-left: 10px; color: #2C3E50;'>{v_req_text.replace(chr(10), '<br>')}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
-                formatted_report = format_report_text_to_html(latest_record.get('填報內容', '無'))
-                st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
-                
-                st.markdown("<div class='morandi-dark-title'>📎 佐證照片或檔案</div>", unsafe_allow_html=True)
-                
-                raw_files = []
-                for i in range(1, 11):
-                    desc = str(latest_record.get(f'檔案{i}_說明', '')).strip()
-                    fid = str(latest_record.get(f'檔案{i}_ID', '')).strip()
-                    if fid: raw_files.append({'desc': desc, 'id': fid})
+                if edit_mode:
+                    st.markdown("<div class='morandi-orange-title'>📝 資料修改區</div>", unsafe_allow_html=True)
+                    
+                    # 1. 編輯基本資料
+                    c_e1, c_e2, c_e3 = st.columns(3)
+                    with c_e1: e_reporter = st.text_input("填報人姓名", value=v_reporter)
+                    with c_e2: e_ext = st.text_input("分機號碼", value=v_ext)
+                    with c_e3: e_email = st.text_input("電子郵件", value=v_email)
+                    
+                    # 2. 編輯填報內容
+                    st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
+                    e_report_text = st.text_area("填寫區", value=latest_record.get('填報內容', ''), height=250, label_visibility="collapsed")
+                    
+                    # 獲取並解析現有檔案
+                    raw_files = []
+                    for i in range(1, 11):
+                        desc = str(latest_record.get(f'檔案{i}_說明', '')).strip()
+                        fid = str(latest_record.get(f'檔案{i}_ID', '')).strip()
+                        if fid: raw_files.append({'desc': desc, 'id': fid})
+                    
+                    enriched_files = []
+                    for rf in raw_files:
+                        info = get_file_info(rf['id'], rf['desc'])
+                        if info: enriched_files.append(info)
+                    
+                    # 3. 現有檔案管理 (附刪除功能)
+                    st.markdown("<div class='morandi-dark-title'>🗑️ 現有照片與檔案 (勾選即可刪除)</div>", unsafe_allow_html=True)
+                    keep_files = []
+                    if len(enriched_files) == 0:
+                        st.info("此紀錄原本無上傳任何附件。")
+                    else:
+                        for idx, f in enumerate(enriched_files):
+                            c_f1, c_f2 = st.columns([1, 4])
+                            with c_f1:
+                                del_check = st.checkbox(f"❌ 刪除此附件", key=f"del_{f['id']}_{idx}")
+                                if not del_check:
+                                    keep_files.append({'desc': f['desc'], 'id': f['id']})
+                            with c_f2:
+                                if f.get('is_image'):
+                                    st.image(f"data:{f['mime_type']};base64,{f['b64']}", width=150, caption=f['desc'])
+                                else:
+                                    st.write(f"📄 {f['desc']}")
+                    
+                    # 4. 新增補充檔案區
+                    st.markdown("<div class='morandi-dark-title'>➕ 補充上傳新照片或檔案</div>", unsafe_allow_html=True)
+                    if "extra_upload_count" not in st.session_state: st.session_state.extra_upload_count = 1
                         
-                enriched_files = []
-                for rf in raw_files:
-                    info = get_file_info(rf['id'], rf['desc'])
-                    if info: enriched_files.append(info)
-                
-                panoramas = [f for f in enriched_files if f.get('is_image') and f.get('is_panorama')]
-                landscapes = [f for f in enriched_files if f.get('is_image') and f.get('is_landscape') and not f.get('is_panorama')]
-                portraits = [f for f in enriched_files if f.get('is_image') and not f.get('is_landscape')]
-                other_docs = [f for f in enriched_files if not f.get('is_image')]
-                
-                if len(enriched_files) == 0:
-                    st.info("此紀錄無上傳任何附件。")
+                    c_add, c_sub, _ = st.columns([2, 2, 6])
+                    if c_add.button("➕ 增加一個上傳區塊"): st.session_state.extra_upload_count += 1
+                    if c_sub.button("➖ 減少一個上傳區塊") and st.session_state.extra_upload_count > 0: st.session_state.extra_upload_count -= 1
+                    
+                    new_files_to_upload = []
+                    for i in range(st.session_state.extra_upload_count):
+                        c_u1, c_u2 = st.columns([1, 1])
+                        with c_u1:
+                            n_desc = st.text_input(f"新檔案 {i+1} 說明", key=f"n_desc_{i}")
+                        with c_u2:
+                            st.write("") # 排版對齊
+                            n_file = st.file_uploader(f"選擇檔案", key=f"n_file_{i}", label_visibility="collapsed")
+                            if n_file:
+                                new_files_to_upload.append({'file': n_file, 'desc': n_desc if n_desc else f"未命名補充附件{i+1}"})
+                    
+                    # 5. 送出更新按鈕
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("💾 儲存修改並覆蓋為最新版本", type="primary", use_container_width=True):
+                        if not e_reporter.strip() or not e_report_text.strip():
+                            st.error("⚠️ 請確保基本資料與填報內容皆有填寫！")
+                        else:
+                            with st.spinner("⏳ 正在處理更新資料..."):
+                                final_upload_records = keep_files.copy()
+                                
+                                # 處理新上傳的檔案
+                                for vf in new_files_to_upload:
+                                    optimized_file = compress_image(vf['file'])
+                                    ext = optimized_file.name.split('.')[-1]
+                                    new_filename = f"{v_q_id}-{vf['desc']}.{ext}"
+                                    file_id = upload_file_to_drive(optimized_file, new_filename, DRIVE_UPLOAD_FOLDER_ID)
+                                    if file_id:
+                                        final_upload_records.append({'desc': vf['desc'], 'id': file_id})
+                                
+                                # 檢查總數限制
+                                if len(final_upload_records) > 10:
+                                    st.warning("⚠️ 附件總數超過10個上限，系統僅為您保留前10個附件。")
+                                    final_upload_records = final_upload_records[:10]
+                                
+                                # 透過原先的 write_to_database 追加寫入 (系統自動視最新一筆為準)
+                                db_success = write_to_database(
+                                    view_unit, e_reporter, e_ext, e_email, 
+                                    v_q_id, v_q_title, e_report_text, final_upload_records
+                                )
+                                
+                                if db_success:
+                                    st.success("🎉 修改成功！系統已更新最新紀錄。")
+                                    load_reported_data.clear() # 清除快取以讀取最新資料
+                                    get_file_info.clear()
+                                    time.sleep(1.5)
+                                    st.rerun()
+
                 else:
-                    table_html = "<table style='width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #D9E0E3; background-color:white; margin-bottom: 25px;'>"
+                    # === 以下為原本的檢視與 Word 下載模式 (完全保留原邏輯) ===
+                    st.markdown(f"<div style='color: #555555; font-size: 1.15em; margin-bottom: 10px; font-weight: bold;'>👤 填報人：{v_reporter} &nbsp;|&nbsp; 📞 分機：{v_ext} &nbsp;|&nbsp; 📧 Email：{v_email}</div>", unsafe_allow_html=True)
                     
-                    for pano in panoramas:
-                        table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:middle;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
+                    st.markdown(f"<div class='morandi-question-title'>📖 {v_q_id}：{v_q_title}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='color: #B85042; font-weight: bold; font-size: 1.3em; padding-left: 5px; margin-bottom: 25px;'>{v_desc_text}</div>", unsafe_allow_html=True)
                     
-                    pairs = []
-                    for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
-                    rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
+                    st.markdown(f"""
+                    <div class='light-brown-box'>
+                        <strong style='font-size: 1.4em; color: #B85042;'>🔍 資料需求：</strong><br>
+                        <div style='font-size: 1.2em; margin-top: 10px; padding-left: 10px; color: #2C3E50;'>{v_req_text.replace(chr(10), '<br>')}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    for i in range(0, len(portraits) - 1, 2): pairs.append((portraits[i], portraits[i+1]))
-                    rem_p = portraits[-1] if len(portraits) % 2 != 0 else None
+                    st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
+                    formatted_report = format_report_text_to_html(latest_record.get('填報內容', '無'))
+                    st.markdown(f"<div style='background-color: #F8FAFB; padding: 20px; border-radius: 8px; border: 1px solid #E2E7E3; font-size: 1.1em; color: #2C3E50; margin-bottom: 25px;'>{formatted_report}</div>", unsafe_allow_html=True)
                     
-                    if rem_l and rem_p: pairs.append((rem_l, rem_p))
-                    elif rem_l: pairs.append((rem_l, None))
-                    elif rem_p: pairs.append((rem_p, None))
+                    st.markdown("<div class='morandi-dark-title'>📎 佐證照片或檔案</div>", unsafe_allow_html=True)
                     
-                    for p1, p2 in pairs:
-                        table_html += "<tr>"
-                        for f in [p1, p2]:
-                            if f:
-                                ratio = "7.5/5.5" if f['is_landscape'] else "7/9"
-                                table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; width:50%; vertical-align:middle;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='aspect-ratio:{ratio}; width:100%; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
-                            else:
-                                table_html += "<td style='border:1px solid #D9E0E3; width:50%; vertical-align:middle;'></td>"
-                        table_html += "</tr>"
+                    raw_files = []
+                    for i in range(1, 11):
+                        desc = str(latest_record.get(f'檔案{i}_說明', '')).strip()
+                        fid = str(latest_record.get(f'檔案{i}_ID', '')).strip()
+                        if fid: raw_files.append({'desc': desc, 'id': fid})
+                            
+                    enriched_files = []
+                    for rf in raw_files:
+                        info = get_file_info(rf['id'], rf['desc'])
+                        if info: enriched_files.append(info)
                     
-                    table_html += "</table>"
+                    panoramas = [f for f in enriched_files if f.get('is_image') and f.get('is_panorama')]
+                    landscapes = [f for f in enriched_files if f.get('is_image') and f.get('is_landscape') and not f.get('is_panorama')]
+                    portraits = [f for f in enriched_files if f.get('is_image') and not f.get('is_landscape')]
+                    other_docs = [f for f in enriched_files if not f.get('is_image')]
                     
-                    if len(panoramas) > 0 or len(pairs) > 0:
-                        st.markdown(table_html, unsafe_allow_html=True)
+                    if len(enriched_files) == 0:
+                        st.info("此紀錄無上傳任何附件。")
+                    else:
+                        table_html = "<table style='width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #D9E0E3; background-color:white; margin-bottom: 25px;'>"
+                        
+                        for pano in panoramas:
+                            table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:middle;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
+                        
+                        pairs = []
+                        for i in range(0, len(landscapes) - 1, 2): pairs.append((landscapes[i], landscapes[i+1]))
+                        rem_l = landscapes[-1] if len(landscapes) % 2 != 0 else None
+                        
+                        for i in range(0, len(portraits) - 1, 2): pairs.append((portraits[i], portraits[i+1]))
+                        rem_p = portraits[-1] if len(portraits) % 2 != 0 else None
+                        
+                        if rem_l and rem_p: pairs.append((rem_l, rem_p))
+                        elif rem_l: pairs.append((rem_l, None))
+                        elif rem_p: pairs.append((rem_p, None))
+                        
+                        for p1, p2 in pairs:
+                            table_html += "<tr>"
+                            for f in [p1, p2]:
+                                if f:
+                                    ratio = "7.5/5.5" if f['is_landscape'] else "7/9"
+                                    table_html += f"<td style='border:1px solid #D9E0E3; padding:15px; text-align:center; width:50%; vertical-align:middle;'><img src='data:{f['mime_type']};base64,{f['b64']}' style='aspect-ratio:{ratio}; width:100%; object-fit:contain; background-color:#f1f1f1; border-radius:8px; margin-bottom:10px;'><br><b>{f['desc']}</b></td>"
+                                else:
+                                    table_html += "<td style='border:1px solid #D9E0E3; width:50%; vertical-align:middle;'></td>"
+                            table_html += "</tr>"
+                        
+                        table_html += "</table>"
+                        
+                        if len(panoramas) > 0 or len(pairs) > 0:
+                            st.markdown(table_html, unsafe_allow_html=True)
+                        
+                        if len(other_docs) > 0:
+                            for f in other_docs:
+                                drive_link = f"https://drive.google.com/file/d/{f['id']}/view"
+                                icon, ftype = ("📄", "PDF 檔案") if f.get('is_pdf') else ("📁", "其他文件")
+                                st.markdown(f"""
+                                <div style='background-color: #f1f1f1; border-radius: 8px; border: 1px solid #ccc; padding: 25px; text-align: center; margin-bottom: 20px;'>
+                                    <span style='font-size:1.5em;'>{icon}</span> <span style='font-size:1.1em; font-weight:bold;'>📌 {f['desc']} ({ftype})</span><br><br>
+                                    <a href='{drive_link}' target='_blank' style='background-color: #5C6B73; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold;'>🔗 點擊前往雲端檢視</a>
+                                </div>
+                                """, unsafe_allow_html=True)
                     
-                    if len(other_docs) > 0:
-                        for f in other_docs:
-                            drive_link = f"https://drive.google.com/file/d/{f['id']}/view"
-                            icon, ftype = ("📄", "PDF 檔案") if f.get('is_pdf') else ("📁", "其他文件")
-                            st.markdown(f"""
-                            <div style='background-color: #f1f1f1; border-radius: 8px; border: 1px solid #ccc; padding: 25px; text-align: center; margin-bottom: 20px;'>
-                                <span style='font-size:1.5em;'>{icon}</span> <span style='font-size:1.1em; font-weight:bold;'>📌 {f['desc']} ({ftype})</span><br><br>
-                                <a href='{drive_link}' target='_blank' style='background-color: #5C6B73; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold;'>🔗 點擊前往雲端檢視</a>
-                            </div>
-                            """, unsafe_allow_html=True)
-                
-                st.markdown("---")
-                st.markdown("<div style='text-align: center; margin-bottom: 10px;'><b>想要留存這份填報紀錄嗎？</b></div>", unsafe_allow_html=True)
-                
-                with st.spinner("⏳ 正在為您產生 Word 報告檔案..."):
-                    docx_bytes = generate_word_report(
-                        view_unit, v_reporter, v_ext, v_email, v_q_id, v_q_title, 
-                        v_desc_text, v_req_text, latest_record.get('填報內容', ''), enriched_files
-                    )
-                
-                col_dl1, col_dl2, col_dl3 = st.columns([3, 4, 3])
-                with col_dl2:
-                    st.download_button(
-                        label="📥 下載填報成果 (Word檔)",
-                        data=docx_bytes,
-                        file_name=f"{view_unit}_{v_q_id}_填報成果.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True
-                    )
+                    st.markdown("---")
+                    st.markdown("<div style='text-align: center; margin-bottom: 10px;'><b>想要留存這份填報紀錄嗎？</b></div>", unsafe_allow_html=True)
+                    
+                    with st.spinner("⏳ 正在為您產生 Word 報告檔案..."):
+                        docx_bytes = generate_word_report(
+                            view_unit, v_reporter, v_ext, v_email, v_q_id, v_q_title, 
+                            v_desc_text, v_req_text, latest_record.get('填報內容', ''), enriched_files
+                        )
+                    
+                    col_dl1, col_dl2, col_dl3 = st.columns([3, 4, 3])
+                    with col_dl2:
+                        st.download_button(
+                            label="📥 下載填報成果 (Word檔)",
+                            data=docx_bytes,
+                            file_name=f"{view_unit}_{v_q_id}_填報成果.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True
+                        )
 
 # ==========================================
 # 🚀 主程式執行區
