@@ -679,7 +679,12 @@ def render_tab_manage():
         for idx, row in df_targets.iterrows():
             real_row_idx = idx + 2
             q_id = str(row.get('對應題號', row.get('題號', ''))).strip()
+            
+            # 🌟 加入空值防護，確保中文標題一定有內容可以顯示
             q_title = str(row.get('中文標題', '')).strip()
+            if not q_title or q_title.lower() == 'nan':
+                q_title = "(未命名標題)"
+                
             kw_col = '搜尋關鍵字或判斷準則' if '搜尋關鍵字或判斷準則' in df_targets.columns else '關鍵字或判斷準則'
             raw_kw = str(row.get(kw_col, '')).strip()
 
@@ -687,8 +692,8 @@ def render_tab_manage():
 
             chips_html = "".join([f"<span class='topic-chip'>#{k.strip()}</span>" for k in raw_kw.split(',') if k.strip()])
             
-            # 🌟 8:2 版面分割
-            c_left, c_right = st.columns([8, 2])
+            # 🌟 版面分割改為 6:4
+            c_left, c_right = st.columns([6, 4])
             
             with c_left:
                 st.markdown(f"""
@@ -700,18 +705,18 @@ def render_tab_manage():
                 
             with c_right:
                 st.markdown(f"""
-                <div style='background-color: #F4F6F7; padding: 15px; border-radius: 10px; border: 1px solid #D9E0E3; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); height: calc(100% - 60px); overflow-y: auto;'>
+                <div style='background-color: #F4F6F7; padding: 15px; border-radius: 10px; border: 1px solid #D9E0E3; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); min-height: 90px;'>
                     <div style='color: #5C6B73; font-weight: bold; margin-bottom: 10px;'>🔑 搜尋關鍵字：</div>
                     {chips_html}
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 按鈕置於關鍵字區塊下方
+                # 🌟 按鈕設定滿版寬度，解決擠壓問題
                 c_b1, c_b2 = st.columns(2)
                 with c_b1:
-                    with st.popover("✏️ 修改關鍵字"):
+                    with st.popover("✏️ 修改關鍵字", use_container_width=True):
                         edit_kw = st.text_input("編輯關鍵字 (逗號分隔)", value=raw_kw, key=f"edit_{real_row_idx}")
-                        if st.button("💾 儲存修改", key=f"save_{real_row_idx}"):
+                        if st.button("💾 儲存修改", key=f"save_{real_row_idx}", use_container_width=True):
                             gc, _ = init_google_apis()
                             ws = gc.open_by_key(SHEET_ID).worksheet("原始新聞抓取")
                             headers = [str(h).strip() for h in ws.get_all_values()[0]]
@@ -722,7 +727,7 @@ def render_tab_manage():
                             time.sleep(1)
                             st.rerun()
                 with c_b2:
-                    if st.button("🗑️ 刪除此題", key=f"del_{real_row_idx}"):
+                    if st.button("🗑️ 刪除此題", key=f"del_{real_row_idx}", use_container_width=True):
                         gc, _ = init_google_apis()
                         ws = gc.open_by_key(SHEET_ID).worksheet("原始新聞抓取")
                         delete_rows_from_db(ws, [real_row_idx])
@@ -750,24 +755,27 @@ def render_tab_scrape():
         q_title = str(r.get('中文標題', '')).strip()
         if q_id: target_options.append(f"{q_id} - {q_title}")
 
+    # 🌟 獨立宣告所有狀態變數，徹底杜絕 AttributeError
+    if 'scan_done' not in st.session_state: st.session_state.scan_done = False
+    if 'green_zone_saved' not in st.session_state: st.session_state.green_zone_saved = []
+    if 'yellow_zone' not in st.session_state: st.session_state.yellow_zone = []
+    if 'skipped_count' not in st.session_state: st.session_state.skipped_count = 0
+
     c_opt1, c_opt2 = st.columns([3, 1])
     with c_opt1:
         selected_targets = st.multiselect("🎯 選擇爬取範圍 (若留空則代表掃描全校題目)", target_options, placeholder="請選擇一題或多題...")
     with c_opt2:
         st.write("") 
         if st.button("🧹 重置掃描狀態", use_container_width=True):
-            if 'scan_done' in st.session_state: del st.session_state['scan_done']
+            st.session_state.scan_done = False
+            st.session_state.green_zone_saved = []
+            st.session_state.yellow_zone = []
+            st.session_state.skipped_count = 0
             st.rerun()
 
     c_start, c_end = st.columns(2)
     with c_start: start_date = st.date_input("新聞起日", datetime.date(2024, 1, 1))
     with c_end: end_date = st.date_input("新聞迄日", datetime.date.today())
-
-    if 'scan_done' not in st.session_state:
-        st.session_state.scan_done = False
-        st.session_state.green_zone_saved = []
-        st.session_state.yellow_zone = []
-        st.session_state.skipped_count = 0
 
     # ==================================
     # 動作一：外網掃描 + 綠燈直接寫入 + 黃燈保留
@@ -824,7 +832,6 @@ def render_tab_scrape():
                         if len(data['matches']) == 1: green_zone_tasks.append(data)
                         else: yellow_zone.append(data)
 
-                # 🌟 綠燈區直接處理入庫
                 green_saved_list = []
                 if green_zone_tasks:
                     st.info(f"🟢 發現 {len(green_zone_tasks)} 篇單一命中新聞，正在自動為您擷取與寫入資料庫...")
@@ -890,7 +897,6 @@ def render_tab_scrape():
             st.info("無衝突新聞，太完美了！所有新聞已處理完畢。")
         else:
             for i, item in enumerate(st.session_state.yellow_zone):
-                # 🌟 修復排版：文字與連結放進 div 容器，選單獨立在下方
                 st.markdown(f"""
                 <div style='background-color: #FFF9E6; padding: 15px; border-left: 5px solid #F1C40F; border-radius: 6px; margin-bottom: 5px;'>
                     <b style='font-size: 1.1em; color: #2C3E50;'>📰 {item['news']['新聞標題']}</b><br>
@@ -898,7 +904,6 @@ def render_tab_scrape():
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 選單包含完整 中文標題
                 options = [f"{m['q_id']} - {m['q_title']}" for m in item['matches']]
                 st.selectbox("🎯 請為這篇新聞選擇最終歸屬：", options, key=f"yz_sel_{i}")
                 st.markdown("<hr style='margin: 15px 0; border-top: 1px dashed #D5DBDB;'>", unsafe_allow_html=True)
@@ -947,7 +952,13 @@ def render_tab_scrape():
                     progress_text.empty()
                     my_bar.empty()
                     load_sheet.clear()
-                    del st.session_state['scan_done']
+                    
+                    # 🌟 寫入完成後，清空狀態回到掃描前
+                    st.session_state.scan_done = False
+                    st.session_state.green_zone_saved = []
+                    st.session_state.yellow_zone = []
+                    st.session_state.skipped_count = 0
+                    
                     st.success(f"🎉 作業完成！成功將 {success_count} 筆分流新聞入庫，請前往「階段二」進行改寫。")
 
 @st.fragment
