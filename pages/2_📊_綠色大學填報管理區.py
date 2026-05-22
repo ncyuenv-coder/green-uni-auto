@@ -374,7 +374,7 @@ def extract_single_question_data(v_q_id, df_q, df_r):
 def build_word_document(v_q_id, v_q_title, info_strings_word, desc_text, req_text, report_text, unit_enriched_files):
     doc = Document()
     
-    # --- 🌟 設定為中等邊界 ---
+    # --- 設定為中等邊界 ---
     section = doc.sections[0]
     section.top_margin = Cm(2.54)
     section.bottom_margin = Cm(2.54)
@@ -413,7 +413,7 @@ def build_word_document(v_q_id, v_q_title, info_strings_word, desc_text, req_tex
     doc.add_heading('佐證照片/檔案：', level=2)
     add_images_to_word_table(doc, unit_enriched_files)
     
-    # 🌟 修改點：處理 PDF 與其他文件
+    # 處理 PDF 與其他文件
     has_any_doc = any(not f.get('is_image') for files in unit_enriched_files.values() for f in files)
     if has_any_doc:
         doc.add_heading('其他參考資料：', level=2)
@@ -424,23 +424,32 @@ def build_word_document(v_q_id, v_q_title, info_strings_word, desc_text, req_tex
                     doc.add_paragraph(f"{u}").runs[0].bold = True
                     
                 for f in docs:
-                    p1 = doc.add_paragraph()
-                    p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    ftype = "PDF 檔案" if f.get('is_pdf') else "其他文件"
-                    p1.add_run(f"{f['desc']} (此為 {ftype})").bold = True
-                    
-                    if f.get('is_pdf') and f.get('pdf_pages'):
-                        for page in f['pdf_pages']:
-                            p_img = doc.add_paragraph()
-                            p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            img_bytes = base64.b64decode(page['b64'])
-                            fh = io.BytesIO(img_bytes)
-                            try:
-                                if page['is_landscape']: p_img.add_run().add_picture(fh, height=Cm(10.0))
-                                else: p_img.add_run().add_picture(fh, width=Cm(15.0))
-                            except Exception:
-                                p_img.add_run("(PDF 圖片無法插入)")
+                    if f.get('is_pdf'):
+                        doc.add_page_break() # 🌟 PDF 檔案強制換頁獨立顯示
+                        
+                        p1 = doc.add_paragraph()
+                        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        p1.add_run(f"{f['desc']} (此為 PDF 檔案)").bold = True
+                        
+                        if f.get('pdf_pages'):
+                            for page in f['pdf_pages']:
+                                p_img = doc.add_paragraph()
+                                p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                img_bytes = base64.b64decode(page['b64'])
+                                fh = io.BytesIO(img_bytes)
+                                try:
+                                    if page['is_landscape']: p_img.add_run().add_picture(fh, height=Cm(10.0))
+                                    else: p_img.add_run().add_picture(fh, width=Cm(15.0))
+                                except Exception:
+                                    p_img.add_run("(PDF 圖片無法插入)")
+                        else:
+                            p2 = doc.add_paragraph()
+                            p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            p2.add_run(f"請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
                     else:
+                        p1 = doc.add_paragraph()
+                        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        p1.add_run(f"{f['desc']} (此為 其他文件)").bold = True
                         p2 = doc.add_paragraph()
                         p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         p2.add_run(f"請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
