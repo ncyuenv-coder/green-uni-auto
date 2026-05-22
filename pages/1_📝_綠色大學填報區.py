@@ -15,7 +15,7 @@ from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from docx import Document
 from docx.shared import Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_ALIGN_VERTICAL
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 
@@ -250,38 +250,25 @@ def get_file_info(file_id, desc=""):
         fh.seek(0)
         file_bytes = fh.read()
         
-        # --- 🌟 新增：PDF 完整頁面轉圖引擎 ---
+        # --- 🌟 PDF 分頁截圖引擎 ---
+        pdf_pages = []
         if is_pdf:
             try:
                 import fitz  # 依賴 PyMuPDF
                 doc = fitz.open(stream=file_bytes, filetype="pdf")
-                img_list = []
-                # 遍歷 PDF 所有頁面
                 for page_num in range(len(doc)):
                     pix = doc[page_num].get_pixmap(dpi=150)
                     img = Image.open(io.BytesIO(pix.tobytes("png")))
                     if img.mode in ("RGBA", "P"): img = img.convert("RGB")
-                    img_list.append(img)
-                
-                # 若有多頁，將其垂直合併為一張長圖
-                if img_list:
-                    total_height = sum(i.height for i in img_list)
-                    max_width = max(i.width for i in img_list)
-                    combined_img = Image.new('RGB', (max_width, total_height), (255, 255, 255))
-                    y_offset = 0
-                    for i in img_list:
-                        combined_img.paste(i, (0, y_offset))
-                        y_offset += i.height
                     
                     output = io.BytesIO()
-                    combined_img.save(output, format='JPEG', quality=85)
-                    file_bytes = output.getvalue()
+                    img.save(output, format='JPEG', quality=85)
                     
-                    # 轉換成功後，系統將其視為圖片處理
-                    is_image = True
-                    mime_type = 'image/jpeg'
+                    page_landscape = img.width >= img.height
+                    b64_str = base64.b64encode(output.getvalue()).decode('utf-8')
+                    pdf_pages.append({'b64': b64_str, 'is_landscape': page_landscape})
             except Exception as e:
-                pass # 若轉換失敗，保留原始 PDF 處理邏輯
+                pass 
         # -------------------------------------
 
         is_landscape = True
@@ -295,7 +282,7 @@ def get_file_info(file_id, desc=""):
             except Exception: pass
             
         b64_str = base64.b64encode(file_bytes).decode('utf-8') if is_image else ""
-        return {'id': file_id, 'desc': desc, 'is_pdf': is_pdf, 'is_image': is_image, 'is_landscape': is_landscape, 'is_panorama': is_panorama, 'b64': b64_str, 'mime_type': mime_type}
+        return {'id': file_id, 'desc': desc, 'is_pdf': is_pdf, 'is_image': is_image, 'is_landscape': is_landscape, 'is_panorama': is_panorama, 'b64': b64_str, 'mime_type': mime_type, 'pdf_pages': pdf_pages}
     except Exception as e: return None
 
 # [防護盾 1] 寫入重試機制 (解決多人同時送出的 429 錯誤)
@@ -351,6 +338,14 @@ def set_run_font(run):
 
 def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, req_text, report_text, enriched_files):
     doc = Document()
+    
+    # --- 🌟 設定為中等邊界 ---
+    section = doc.sections[0]
+    section.top_margin = Cm(2.54)
+    section.bottom_margin = Cm(2.54)
+    section.left_margin = Cm(1.91)
+    section.right_margin = Cm(1.91)
+    
     doc.add_heading(f'嘉大綠色大學填報成果 - {unit}', 0)
     
     if reporter or ext or email:
@@ -398,6 +393,7 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
     if len(panoramas) > 0 or len(landscapes) > 0 or len(portraits) > 0:
         table = doc.add_table(rows=0, cols=2)
         table.style = 'Table Grid'
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER # 🌟 表格置中
         
         # 1. 處理全景圖
         for pano in panoramas:
@@ -455,19 +451,35 @@ def generate_word_report(unit, reporter, ext, email, q_id, q_title, desc_text, r
                     p_text = cell.add_paragraph(f"{f['desc']}")
                     p_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
+    # 🌟 處理 PDF 與其他文件
     if len(other_docs) > 0:
         for f in other_docs:
             p1 = doc.add_paragraph()
+            p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
             ftype = "PDF 檔案" if f.get('is_pdf') else "其他文件"
             p1.add_run(f"{f['desc']} (此為 {ftype})").bold = True
-            p2 = doc.add_paragraph()
-            p2.add_run(f"請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
+            
+            if f.get('is_pdf') and f.get('pdf_pages'):
+                for page in f['pdf_pages']:
+                    p_img = doc.add_paragraph()
+                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    img_bytes = base64.b64decode(page['b64'])
+                    fh = io.BytesIO(img_bytes)
+                    try:
+                        if page['is_landscape']: p_img.add_run().add_picture(fh, height=Cm(10.0))
+                        else: p_img.add_run().add_picture(fh, width=Cm(16.5))
+                    except Exception:
+                        p_img.add_run("(PDF 圖片無法插入)")
+            else:
+                p2 = doc.add_paragraph()
+                p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p2.add_run(f"請至雲端檢視：https://drive.google.com/file/d/{f['id']}/view")
             
     if len(panoramas) == 0 and len(pairs) == 0 and len(other_docs) == 0: 
         doc.add_paragraph("此紀錄無上傳任何附件。")
     
     for p in doc.paragraphs:
-        if not p.style.name.startswith('Heading'): p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        if not p.style.name.startswith('Heading') and p.alignment is None: p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         for r in p.runs: set_run_font(r)
             
     for table in doc.tables:
@@ -662,7 +674,6 @@ def render_tab1_fill():
 @st.fragment
 def render_tab2_view():
     df_reported = load_reported_data()
-    # 確保 Tab 2 的 Fragment 也能安全取用題目資料 (直接從快取讀取，不耗效能)
     df_questions = load_gsheet_data()
     
     if df_reported.empty: 
@@ -672,7 +683,6 @@ def render_tab2_view():
         for u in df_reported['權責單位'].dropna().unique():
             if str(u).strip() != '': rep_units.append(str(u).strip())
             
-        # 🌟 繁體中文筆畫排序魔法
         rep_units = sorted(rep_units, key=lambda x: str(x).encode('big5', errors='ignore'))
         
         c_v_unit, c_v_item = st.columns(2)
@@ -711,10 +721,26 @@ def render_tab2_view():
                 v_ext = latest_record.get('填報人分機', '無')
                 v_email = latest_record.get('填報人電子郵件', '無')
                 
-                # === 🌟 核心切換：編輯模式開關 ===
-                edit_mode = st.toggle("✏️ 開啟編輯 / 修正此筆資料", key=f"edit_toggle_{v_q_id}")
+                # === 🌟 核心切換：編輯模式狀態按鈕 (深灰色) ===
+                state_key = f"edit_mode_{v_q_id}"
+                if state_key not in st.session_state: st.session_state[state_key] = False
                 
-                if edit_mode:
+                # 注入深灰色按鈕樣式
+                st.markdown("""
+                <style>
+                    button:has(p:contains("開啟 / 編輯修正資料")), button:has(p:contains("取消編輯模式")) {
+                        background-color: #5C6B73 !important; color: white !important;
+                        border: none !important; border-radius: 6px !important; margin-bottom: 15px !important;
+                    }
+                </style>
+                """, unsafe_allow_html=True)
+                
+                btn_text = "❌ 取消編輯模式" if st.session_state[state_key] else "✏️ 開啟 / 編輯修正資料"
+                if st.button(btn_text, key=f"btn_{v_q_id}"):
+                    st.session_state[state_key] = not st.session_state[state_key]
+                    st.rerun()
+                
+                if st.session_state[state_key]:
                     st.markdown("<div class='morandi-orange-title'>📝 資料修改區</div>", unsafe_allow_html=True)
                     
                     # 1. 編輯基本資料
@@ -739,7 +765,7 @@ def render_tab2_view():
                         info = get_file_info(rf['id'], rf['desc'])
                         if info: enriched_files.append(info)
                     
-                    # 3. 現有檔案管理 (附刪除功能)
+                    # 3. 現有檔案管理
                     st.markdown("<div class='morandi-dark-title'>🗑️ 現有照片與檔案 (勾選即可刪除)</div>", unsafe_allow_html=True)
                     keep_files = []
                     if len(enriched_files) == 0:
@@ -754,11 +780,14 @@ def render_tab2_view():
                             with c_f2:
                                 if f.get('is_image'):
                                     st.image(f"data:{f['mime_type']};base64,{f['b64']}", width=150, caption=f['desc'])
+                                elif f.get('is_pdf') and f.get('pdf_pages'):
+                                    st.markdown(f"📄 **{f['desc']} (PDF 檔案)**")
+                                    st.image(f"data:image/jpeg;base64,{f['pdf_pages'][0]['b64']}", width=150, caption="PDF 首頁預覽")
                                 else:
-                                    st.write(f"📄 {f['desc']}")
+                                    st.write(f"📁 {f['desc']}")
                     
                     # 4. 新增補充檔案區
-                    st.markdown("<div class='morandi-dark-title'>➕ 補充上傳新照片或檔案</div>", unsafe_allow_html=True)
+                    st.markdown("<div class='morandi-dark-title'>➕ 增加/減少一個上傳照片或檔案</div>", unsafe_allow_html=True)
                     if "extra_upload_count" not in st.session_state: st.session_state.extra_upload_count = 1
                         
                     c_add, c_sub, _ = st.columns([2, 2, 6])
@@ -771,7 +800,7 @@ def render_tab2_view():
                         with c_u1:
                             n_desc = st.text_input(f"新檔案 {i+1} 說明", key=f"n_desc_{i}")
                         with c_u2:
-                            st.write("") # 排版對齊
+                            st.write("") 
                             n_file = st.file_uploader(f"選擇檔案", key=f"n_file_{i}", label_visibility="collapsed")
                             if n_file:
                                 new_files_to_upload.append({'file': n_file, 'desc': n_desc if n_desc else f"未命名補充附件{i+1}"})
@@ -785,7 +814,6 @@ def render_tab2_view():
                             with st.spinner("⏳ 正在處理更新資料..."):
                                 final_upload_records = keep_files.copy()
                                 
-                                # 處理新上傳的檔案
                                 for vf in new_files_to_upload:
                                     optimized_file = compress_image(vf['file'])
                                     ext = optimized_file.name.split('.')[-1]
@@ -794,12 +822,10 @@ def render_tab2_view():
                                     if file_id:
                                         final_upload_records.append({'desc': vf['desc'], 'id': file_id})
                                 
-                                # 檢查總數限制
                                 if len(final_upload_records) > 10:
                                     st.warning("⚠️ 附件總數超過10個上限，系統僅為您保留前10個附件。")
                                     final_upload_records = final_upload_records[:10]
                                 
-                                # 透過原先的 write_to_database 追加寫入 (系統自動視最新一筆為準)
                                 db_success = write_to_database(
                                     view_unit, e_reporter, e_ext, e_email, 
                                     v_q_id, v_q_title, e_report_text, final_upload_records
@@ -807,15 +833,14 @@ def render_tab2_view():
                                 
                                 if db_success:
                                     st.success("🎉 修改成功！系統已更新最新紀錄。")
-                                    load_reported_data.clear() # 清除快取以讀取最新資料
+                                    st.session_state[state_key] = False
+                                    load_reported_data.clear() 
                                     get_file_info.clear()
                                     time.sleep(1.5)
                                     st.rerun()
 
                 else:
-                    # === 以下為原本的檢視與 Word 下載模式 (完全保留原邏輯) ===
                     st.markdown(f"<div style='color: #555555; font-size: 1.15em; margin-bottom: 10px; font-weight: bold;'>👤 填報人：{v_reporter} &nbsp;|&nbsp; 📞 分機：{v_ext} &nbsp;|&nbsp; 📧 Email：{v_email}</div>", unsafe_allow_html=True)
-                    
                     st.markdown(f"<div class='morandi-question-title'>📖 {v_q_id}：{v_q_title}</div>", unsafe_allow_html=True)
                     st.markdown(f"<div style='color: #B85042; font-weight: bold; font-size: 1.3em; padding-left: 5px; margin-bottom: 25px;'>{v_desc_text}</div>", unsafe_allow_html=True)
                     
@@ -852,7 +877,6 @@ def render_tab2_view():
                         st.info("此紀錄無上傳任何附件。")
                     else:
                         table_html = "<table style='width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #D9E0E3; background-color:white; margin-bottom: 25px;'>"
-                        
                         for pano in panoramas:
                             table_html += f"<tr><td colspan='2' style='border:1px solid #D9E0E3; padding:15px; text-align:center; vertical-align:middle;'><img src='data:{pano['mime_type']};base64,{pano['b64']}' style='width:100%; height:auto; max-height:400px; object-fit:contain; border-radius:8px; margin-bottom:10px;'><br><b>{pano['desc']}</b></td></tr>"
                         
@@ -876,22 +900,27 @@ def render_tab2_view():
                                 else:
                                     table_html += "<td style='border:1px solid #D9E0E3; width:50%; vertical-align:middle;'></td>"
                             table_html += "</tr>"
-                        
                         table_html += "</table>"
                         
                         if len(panoramas) > 0 or len(pairs) > 0:
                             st.markdown(table_html, unsafe_allow_html=True)
                         
+                        # 🌟 系統顯示 PDF 滿版
                         if len(other_docs) > 0:
                             for f in other_docs:
-                                drive_link = f"https://drive.google.com/file/d/{f['id']}/view"
-                                icon, ftype = ("📄", "PDF 檔案") if f.get('is_pdf') else ("📁", "其他文件")
-                                st.markdown(f"""
-                                <div style='background-color: #f1f1f1; border-radius: 8px; border: 1px solid #ccc; padding: 25px; text-align: center; margin-bottom: 20px;'>
-                                    <span style='font-size:1.5em;'>{icon}</span> <span style='font-size:1.1em; font-weight:bold;'>📌 {f['desc']} ({ftype})</span><br><br>
-                                    <a href='{drive_link}' target='_blank' style='background-color: #5C6B73; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold;'>🔗 點擊前往雲端檢視</a>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                if f.get('is_pdf') and f.get('pdf_pages'):
+                                    st.markdown(f"<div style='background-color: #f1f1f1; border-radius: 8px; border: 1px solid #ccc; padding: 15px; text-align: center; margin-bottom: 20px;'><span style='font-size:1.5em;'>📄</span> <span style='font-size:1.1em; font-weight:bold;'>📌 {f['desc']} (PDF 檔案)</span></div>", unsafe_allow_html=True)
+                                    for page in f['pdf_pages']:
+                                        st.image(f"data:image/jpeg;base64,{page['b64']}", use_container_width=True)
+                                else:
+                                    drive_link = f"https://drive.google.com/file/d/{f['id']}/view"
+                                    icon, ftype = ("📄", "PDF 檔案") if f.get('is_pdf') else ("📁", "其他文件")
+                                    st.markdown(f"""
+                                    <div style='background-color: #f1f1f1; border-radius: 8px; border: 1px solid #ccc; padding: 25px; text-align: center; margin-bottom: 20px;'>
+                                        <span style='font-size:1.5em;'>{icon}</span> <span style='font-size:1.1em; font-weight:bold;'>📌 {f['desc']} ({ftype})</span><br><br>
+                                        <a href='{drive_link}' target='_blank' style='background-color: #5C6B73; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold;'>🔗 點擊前往雲端檢視</a>
+                                    </div>
+                                    """, unsafe_allow_html=True)
                     
                     st.markdown("---")
                     st.markdown("<div style='text-align: center; margin-bottom: 10px;'><b>想要留存這份填報紀錄嗎？</b></div>", unsafe_allow_html=True)
