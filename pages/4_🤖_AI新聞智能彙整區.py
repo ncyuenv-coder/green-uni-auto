@@ -78,11 +78,19 @@ st.markdown("""
     
     .topic-chip { display: inline-block; background-color: #E6F0F9; color: #154360; padding: 6px 12px; border-radius: 20px; font-size: 0.95em; font-weight: bold; margin: 4px 4px 4px 0; border: 1px solid #AED6F1; }
     
-    /* 針對卡片內的編輯/刪除按鈕套用莫蘭迪深色 */
-    div.stButton > button:has(p:contains("修改關鍵字")), div.stButton > button:has(p:contains("刪除此題")) {
+    /* 🌟 修改關鍵字按鈕：莫蘭迪橘色 */
+    div.stButton > button:has(p:contains("修改關鍵字")) {
+        background-color: #D4A373 !important; color: white !important; border: none !important; border-radius: 6px !important; font-size: 1.1em !important;
+    }
+    div.stButton > button:has(p:contains("修改關鍵字")):hover {
+        background-color: #C39262 !important;
+    }
+    
+    /* 🌟 刪除此題按鈕：莫蘭迪深灰藍色 */
+    div.stButton > button:has(p:contains("刪除此題")) {
         background-color: #5C6B73 !important; color: white !important; border: none !important; border-radius: 6px !important; font-size: 1.1em !important;
     }
-    div.stButton > button:has(p:contains("修改關鍵字")):hover, div.stButton > button:has(p:contains("刪除此題")):hover {
+    div.stButton > button:has(p:contains("刪除此題")):hover {
         background-color: #34495E !important;
     }
 </style>
@@ -659,7 +667,7 @@ def render_tab_manage():
         with st.form("add_topic_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             new_id = c1.text_input("對應題號 (如 1.1)")
-            new_title = c2.text_input("中文標題")
+            new_title = c2.text_input("中文名稱")
             new_kw = st.text_input("搜尋關鍵字 (請用逗號 , 分隔，如：綠能,太陽能,節能)")
             if st.form_submit_button("💾 新增題目入庫"):
                 if new_id and new_title and new_kw:
@@ -680,10 +688,10 @@ def render_tab_manage():
             real_row_idx = idx + 2
             q_id = str(row.get('對應題號', row.get('題號', ''))).strip()
             
-            # 🌟 加入空值防護，確保中文標題一定有內容可以顯示
-            q_title = str(row.get('中文標題', '')).strip()
+            # 🌟 終極防護：優先抓取「中文標題/名稱」，若無則「強制抓取 B 欄 (iloc[1])」
+            q_title = str(row.get('中文名稱', row.get('中文標題', row.iloc[1] if len(row) > 1 else '')))).strip()
             if not q_title or q_title.lower() == 'nan':
-                q_title = "(未命名標題)"
+                q_title = "(未命名)"
                 
             kw_col = '搜尋關鍵字或判斷準則' if '搜尋關鍵字或判斷準則' in df_targets.columns else '關鍵字或判斷準則'
             raw_kw = str(row.get(kw_col, '')).strip()
@@ -692,7 +700,6 @@ def render_tab_manage():
 
             chips_html = "".join([f"<span class='topic-chip'>#{k.strip()}</span>" for k in raw_kw.split(',') if k.strip()])
             
-            # 🌟 版面分割改為 6:4
             c_left, c_right = st.columns([6, 4])
             
             with c_left:
@@ -704,14 +711,14 @@ def render_tab_manage():
                 """, unsafe_allow_html=True)
                 
             with c_right:
+                # 🌟 將底色改為左側 #8FAAB8 的刷淡同色系 (#E4ECF0)
                 st.markdown(f"""
-                <div style='background-color: #F4F6F7; padding: 15px; border-radius: 10px; border: 1px solid #D9E0E3; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); min-height: 90px;'>
-                    <div style='color: #5C6B73; font-weight: bold; margin-bottom: 10px;'>🔑 搜尋關鍵字：</div>
+                <div style='background-color: #E4ECF0; padding: 15px; border-radius: 10px; border: 1px solid #C4D3DD; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); min-height: 90px;'>
+                    <div style='color: #4A606D; font-weight: bold; margin-bottom: 10px;'>🔑 搜尋關鍵字：</div>
                     {chips_html}
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 🌟 按鈕設定滿版寬度，解決擠壓問題
                 c_b1, c_b2 = st.columns(2)
                 with c_b1:
                     with st.popover("✏️ 修改關鍵字", use_container_width=True):
@@ -749,13 +756,14 @@ def render_tab_scrape():
         st.error("❌ 題庫為空，請先至「初始階段」建立題目！")
         return
 
+    # 🌟 增強下拉選單資料抓取：強制鎖定 B 欄 (iloc[1])
     target_options = []
     for _, r in df_targets.iterrows():
         q_id = str(r.get('對應題號', r.get('題號', ''))).strip()
-        q_title = str(r.get('中文標題', '')).strip()
+        q_title = str(r.get('中文名稱', r.get('中文標題', r.iloc[1] if len(r) > 1 else '')))).strip()
+        if not q_title or q_title.lower() == 'nan': q_title = "(未命名)"
         if q_id: target_options.append(f"{q_id} - {q_title}")
 
-    # 🌟 獨立宣告所有狀態變數，徹底杜絕 AttributeError
     if 'scan_done' not in st.session_state: st.session_state.scan_done = False
     if 'green_zone_saved' not in st.session_state: st.session_state.green_zone_saved = []
     if 'yellow_zone' not in st.session_state: st.session_state.yellow_zone = []
@@ -804,7 +812,11 @@ def render_tab_scrape():
 
                     for _, target in targets_to_scan.iterrows():
                         q_id = str(target.get('對應題號', target.get('題號', ''))).strip()
-                        q_title = str(target.get('中文標題', '未命名')).strip()
+                        
+                        # 🌟 同步增強迴圈內的抓取邏輯
+                        q_title = str(target.get('中文名稱', target.get('中文標題', target.iloc[1] if len(target) > 1 else '未命名')))).strip()
+                        if not q_title or q_title.lower() == 'nan': q_title = "未命名"
+                        
                         raw_kw = str(target.get(kw_col, ''))
                         if not raw_kw.strip() or raw_kw.lower() == 'nan': raw_kw = q_title
                         keywords = [k.strip() for k in re.split(r'[、,，]', raw_kw) if k.strip()]
@@ -904,6 +916,7 @@ def render_tab_scrape():
                 </div>
                 """, unsafe_allow_html=True)
                 
+                # 🌟 選單現在會帶有透過強制抓取 B 欄獲得的完美中文名稱
                 options = [f"{m['q_id']} - {m['q_title']}" for m in item['matches']]
                 st.selectbox("🎯 請為這篇新聞選擇最終歸屬：", options, key=f"yz_sel_{i}")
                 st.markdown("<hr style='margin: 15px 0; border-top: 1px dashed #D5DBDB;'>", unsafe_allow_html=True)
@@ -953,7 +966,6 @@ def render_tab_scrape():
                     my_bar.empty()
                     load_sheet.clear()
                     
-                    # 🌟 寫入完成後，清空狀態回到掃描前
                     st.session_state.scan_done = False
                     st.session_state.green_zone_saved = []
                     st.session_state.yellow_zone = []
