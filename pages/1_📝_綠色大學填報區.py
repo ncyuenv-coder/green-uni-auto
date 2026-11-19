@@ -56,29 +56,53 @@ with st.sidebar:
 # ==========================================
 st.markdown("""
 <style>
-    /* 標籤頁 (Tabs) 樣式 */
-    button[data-baseweb="tab"] { 
-        background-color: #E6F0F9 !important; 
-        border-radius: 8px 8px 0px 0px !important; 
-        margin-right: 4px !important; 
-        padding: 10px 20px !important; 
-        border: 1px solid #AED6F1 !important; 
-        border-bottom: none !important; 
-        transition: all 0.3s ease; 
+    /* ================= 標籤頁 (Tabs) 樣式 ================= */
+    /* 1. 隱藏舊版 BaseWeb 的紅線裝飾 */
+    div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+    div[data-testid="stTabs"] [data-baseweb="tab-border"] {
+        display: none !important;
     }
-    button[data-baseweb="tab"] p { 
-        font-size: 1.4em !important; 
-        font-weight: bold !important; 
-        color: #2C3E50 !important; 
+
+    /* 2. 針對所有頁籤本體進行按鈕化 (無論 Streamlit 把它包成 div 還是 button，只要有 role="tab" 就抓) */
+    div[data-testid="stTabs"] [role="tab"] {
+        background-color: #4A4A4A !important;
+        border-radius: 10px !important;
+        padding: 8px 24px !important;
+        border: 2px solid transparent !important;
+        margin-right: 10px !important;
+        box-shadow: 0 3px 5px rgba(0,0,0,0.15) !important;
+        transition: all 0.3s ease !important;
+        /* 強制拔除官方在底層預設的紅底線 */
+        border-bottom-color: transparent !important; 
     }
-    /* 選取狀態 */
-    button[data-baseweb="tab"][aria-selected="true"] { 
-        background-color: #154360 !important; 
-        border: 1px solid #0B2331 !important; 
-        border-bottom: 3px solid #0B2331 !important; 
+
+    /* 3. 精準指定內層文字白化 (只鎖定 p 標籤與 span，絕不用 * 破壞版面) */
+    div[data-testid="stTabs"] [role="tab"] p,
+    div[data-testid="stTabs"] [role="tab"] span {
+        color: #FFFFFF !important;
+        font-size: 22px !important;
+        font-weight: 900 !important;
+        margin: 0 !important;
     }
-    button[data-baseweb="tab"][aria-selected="true"] p { 
-        color: #FFFFFF !important; 
+
+    /* 4. 懸停效果 */
+    div[data-testid="stTabs"] [role="tab"]:hover {
+        background-color: #333333 !important;
+        transform: translateY(-2px) !important;
+    }
+
+    /* 5. 點擊選取狀態：亮橘色邊框 */
+    div[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+        background-color: #222222 !important;
+        border: 2px solid #FF9800 !important;
+        border-bottom: 2px solid #FF9800 !important; 
+        box-shadow: 0 3px 5px rgba(0,0,0,0.15) !important; 
+    }
+
+    /* 6. 選取狀態的文字變亮橘色 */
+    div[data-testid="stTabs"] [role="tab"][aria-selected="true"] p,
+    div[data-testid="stTabs"] [role="tab"][aria-selected="true"] span {
+        color: #FF9800 !important;
     }
 
     /* 各區塊標題 */
