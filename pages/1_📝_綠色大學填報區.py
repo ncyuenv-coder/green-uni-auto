@@ -517,12 +517,6 @@ def render_tab1_fill():
                 st.markdown("<div class='morandi-select-title'>📌 請選擇填報項目</div>", unsafe_allow_html=True)
                 selected_option = st.selectbox("", ["請選擇..."] + df_unit_questions['選項標示'].tolist(), label_visibility="collapsed", key="sel_item")
             
-            st.markdown("<div class='morandi-dark-title'>👤 填報人基本資料</div>", unsafe_allow_html=True)
-            c_name, c_ext, c_email = st.columns(3)
-            with c_name: reporter_name = st.text_input("填報人姓名", key="reporter_name", placeholder="請輸入姓名")
-            with c_ext: reporter_ext = st.text_input("分機號碼", key="reporter_ext", placeholder="例如：1234")
-            with c_email: reporter_email = st.text_input("電子郵件", key="reporter_email", placeholder="請輸入 Email")
-            
             if selected_option != "請選擇...":
                 selected_q_id = selected_option.split(" - ")[0]
                 question_data = df_unit_questions[df_unit_questions['當年度題目'].astype(str) == selected_q_id].iloc[0]
@@ -578,6 +572,16 @@ def render_tab1_fill():
                     <div style='font-size: 1.2em; margin-top: 10px; padding-left: 10px; color: #2C3E50;'>{req_text}</div>
                 </div>
                 """, unsafe_allow_html=True)
+                
+                st.markdown("<div class='morandi-dark-title'>👤 填報人基本資料</div>", unsafe_allow_html=True)
+                c_name, c_ext, c_email = st.columns(3)
+                with c_name: reporter_name = st.text_input("填報人姓名", value=st.session_state.get("saved_reporter_name", ""), key="reporter_name", placeholder="請輸入姓名")
+                with c_ext: reporter_ext = st.text_input("分機號碼", value=st.session_state.get("saved_reporter_ext", ""), key="reporter_ext", placeholder="例如：1234")
+                with c_email: reporter_email = st.text_input("電子郵件", value=st.session_state.get("saved_reporter_email", ""), key="reporter_email", placeholder="請輸入 Email")
+                # 同步備份至獨立 session_state，防止送出重置題目選項時清空基本資料
+                st.session_state["saved_reporter_name"] = reporter_name
+                st.session_state["saved_reporter_ext"] = reporter_ext
+                st.session_state["saved_reporter_email"] = reporter_email
                 
                 st.markdown("<div class='morandi-dark-title'>✍️ 填報資訊 / 年度執行亮點成果</div>", unsafe_allow_html=True)
                 report_text = st.text_area("填寫區", height=200, placeholder="請在此輸入您的填寫內容...", label_visibility="collapsed", key="report_input")
