@@ -549,9 +549,11 @@ def render_tab1_fill():
                                 st.info("*(🚧 尚無專屬預覽檔案)*")
                         with col_trans:
                             st.markdown("#### 🇹🇼 中文翻譯參考")
-                            ref_text = question_data.get('2025參考文字_AI預留', '')
-                            if pd.notna(ref_text) and str(ref_text).strip() != "": 
-                                formatted_ref_text = format_report_text_to_html(str(ref_text).strip())
+                            # 直接依原始欄位位置讀取「評比題目表」I 欄 (A=0 ... I=8)，不受表頭更名影響
+                            ref_text = question_data.iloc[8] if len(df_questions.columns) > 8 else ""
+                            ref_text_str = str(ref_text).strip() if pd.notna(ref_text) else ""
+                            if ref_text_str and ref_text_str.lower() not in ['nan', 'none']: 
+                                formatted_ref_text = format_report_text_to_html(ref_text_str)
                                 st.markdown(f'<div class="custom-scrollbar" style="background-color: #FFFFFF; padding: 20px; border-radius: 8px; border: 2px solid #E2E7E3; height: 600px; overflow-y: auto; font-size: 1.1em; color: #2C3E50;">{formatted_ref_text}</div>', unsafe_allow_html=True)
                             else: 
                                 st.info("*(🚧 尚無文字資料)*")
